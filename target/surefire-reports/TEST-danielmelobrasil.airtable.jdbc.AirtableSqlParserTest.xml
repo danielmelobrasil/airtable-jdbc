@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" name="danielmelobrasil.airtable.jdbc.AirtableSqlParserTest" time="0.015" tests="7" errors="0" skipped="0" failures="0">
+  <properties>
+    <property name="java.specification.version" value="23"/>
+    <property name="sun.jnu.encoding" value="UTF-8"/>
+    <property name="java.class.path" value="/Users/danielbrasil/Projects/airtable-jdbc/target/test-classes:/Users/danielbrasil/Projects/airtable-jdbc/target/classes:/Users/danielbrasil/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.17.1/jackson-databind-2.17.1.jar:/Users/danielbrasil/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.17.1/jackson-annotations-2.17.1.jar:/Users/danielbrasil/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.17.1/jackson-core-2.17.1.jar:/Users/danielbrasil/.m2/repository/junit/junit/4.11/junit-4.11.jar:/Users/danielbrasil/.m2/repository/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar:"/>
+    <property name="java.vm.vendor" value="Homebrew"/>
+    <property name="sun.arch.data.model" value="64"/>
+    <property name="java.vendor.url" value="https://github.com/Homebrew/homebrew-core/issues"/>
+    <property name="os.name" value="Mac OS X"/>
+    <property name="java.vm.specification.version" value="23"/>
+    <property name="sun.java.launcher" value="SUN_STANDARD"/>
+    <property name="user.country" value="BR"/>
+    <property name="sun.boot.library.path" value="/opt/homebrew/Cellar/openjdk/23.0.2/libexec/openjdk.jdk/Contents/Home/lib"/>
+    <property name="sun.java.command" value="/Users/danielbrasil/Projects/airtable-jdbc/target/surefire/surefirebooter18254670899955869625.jar /Users/danielbrasil/Projects/airtable-jdbc/target/surefire 2025-10-07T10-29-55_290-jvmRun1 surefire18109043118003909007tmp surefire_07098762818253328729tmp"/>
+    <property name="http.nonProxyHosts" value="local|*.local|169.254/16|*.169.254/16"/>
+    <property name="jdk.debug" value="release"/>
+    <property name="surefire.test.class.path" value="/Users/danielbrasil/Projects/airtable-jdbc/target/test-classes:/Users/danielbrasil/Projects/airtable-jdbc/target/classes:/Users/danielbrasil/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.17.1/jackson-databind-2.17.1.jar:/Users/danielbrasil/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.17.1/jackson-annotations-2.17.1.jar:/Users/danielbrasil/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.17.1/jackson-core-2.17.1.jar:/Users/danielbrasil/.m2/repository/junit/junit/4.11/junit-4.11.jar:/Users/danielbrasil/.m2/repository/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar:"/>
+    <property name="sun.cpu.endian" value="little"/>
+    <property name="user.home" value="/Users/danielbrasil"/>
+    <property name="user.language" value="pt"/>
+    <property name="java.specification.vendor" value="Oracle Corporation"/>
+    <property name="java.version.date" value="2025-01-21"/>
+    <property name="java.home" value="/opt/homebrew/Cellar/openjdk/23.0.2/libexec/openjdk.jdk/Contents/Home"/>
+    <property name="file.separator" value="/"/>
+    <property name="basedir" value="/Users/danielbrasil/Projects/airtable-jdbc"/>
+    <property name="java.vm.compressedOopsMode" value="Zero based"/>
+    <property name="line.separator" value="&#10;"/>
+    <property name="java.vm.specification.vendor" value="Oracle Corporation"/>
+    <property name="java.specification.name" value="Java Platform API Specification"/>
+    <property name="apple.awt.application.name" value="ForkedBooter"/>
+    <property name="surefire.real.class.path" value="/Users/danielbrasil/Projects/airtable-jdbc/target/surefire/surefirebooter18254670899955869625.jar"/>
+    <property name="sun.management.compiler" value="HotSpot 64-Bit Tiered Compilers"/>
+    <property name="ftp.nonProxyHosts" value="local|*.local|169.254/16|*.169.254/16"/>
+    <property name="java.runtime.version" value="23.0.2"/>
+    <property name="user.name" value="danielbrasil"/>
+    <property name="stdout.encoding" value="UTF-8"/>
+    <property name="path.separator" value=":"/>
+    <property name="os.version" value="15.6.1"/>
+    <property name="java.runtime.name" value="OpenJDK Runtime Environment"/>
+    <property name="file.encoding" value="UTF-8"/>
+    <property name="java.vm.name" value="OpenJDK 64-Bit Server VM"/>
+    <property name="java.vendor.version" value="Homebrew"/>
+    <property name="localRepository" value="/Users/danielbrasil/.m2/repository"/>
+    <property name="java.vendor.url.bug" value="https://github.com/Homebrew/homebrew-core/issues"/>
+    <property name="java.io.tmpdir" value="/var/folders/jy/c09k_s8s6s5by3njqj4vsbdc0000gn/T/"/>
+    <property name="java.version" value="23.0.2"/>
+    <property name="user.dir" value="/Users/danielbrasil/Projects/airtable-jdbc"/>
+    <property name="os.arch" value="aarch64"/>
+    <property name="java.vm.specification.name" value="Java Virtual Machine Specification"/>
+    <property name="native.encoding" value="UTF-8"/>
+    <property name="java.library.path" value="/Users/danielbrasil/Library/Java/Extensions:/Library/Java/Extensions:/Network/Library/Java/Extensions:/System/Library/Java/Extensions:/usr/lib/java:."/>
+    <property name="java.vm.info" value="mixed mode, sharing"/>
+    <property name="stderr.encoding" value="UTF-8"/>
+    <property name="java.vendor" value="Homebrew"/>
+    <property name="java.vm.version" value="23.0.2"/>
+    <property name="sun.io.unicode.encoding" value="UnicodeBig"/>
+    <property name="socksNonProxyHosts" value="local|*.local|169.254/16|*.169.254/16"/>
+    <property name="java.class.version" value="67.0"/>
+  </properties>
+  <testcase name="parseSelectWithLeftJoin" classname="danielmelobrasil.airtable.jdbc.AirtableSqlParserTest" time="0.003"/>
+  <testcase name="parseSimpleSelectAll" classname="danielmelobrasil.airtable.jdbc.AirtableSqlParserTest" time="0"/>
+  <testcase name="parseAcceptsLeftJointTypo" classname="danielmelobrasil.airtable.jdbc.AirtableSqlParserTest" time="0"/>
+  <testcase name="parseRejectsUnsupportedWhere" classname="danielmelobrasil.airtable.jdbc.AirtableSqlParserTest" time="0"/>
+  <testcase name="parseRejectsNonSelectStatements" classname="danielmelobrasil.airtable.jdbc.AirtableSqlParserTest" time="0"/>
+  <testcase name="parseSelectWithClauses" classname="danielmelobrasil.airtable.jdbc.AirtableSqlParserTest" time="0.001"/>
+  <testcase name="parseRejectsSelectStarWithJoin" classname="danielmelobrasil.airtable.jdbc.AirtableSqlParserTest" time="0"/>
+</testsuite>

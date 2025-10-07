@@ -1,0 +1,11 @@
+/Users/danielbrasil/Projects/airtable-jdbc/src/main/java/danielmelobrasil/airtable/jdbc/AirtableSqlParser.java
+/Users/danielbrasil/Projects/airtable-jdbc/src/main/java/danielmelobrasil/airtable/jdbc/AirtableDatabaseMetaData.java
+/Users/danielbrasil/Projects/airtable-jdbc/src/main/java/danielmelobrasil/airtable/jdbc/AirtableSqlParseException.java
+/Users/danielbrasil/Projects/airtable-jdbc/src/main/java/danielmelobrasil/airtable/jdbc/AirtableStatement.java
+/Users/danielbrasil/Projects/airtable-jdbc/src/main/java/danielmelobrasil/airtable/jdbc/AirtableConfig.java
+/Users/danielbrasil/Projects/airtable-jdbc/src/main/java/danielmelobrasil/airtable/jdbc/AirtableResultSet.java
+/Users/danielbrasil/Projects/airtable-jdbc/src/main/java/danielmelobrasil/airtable/jdbc/AirtableConnection.java
+/Users/danielbrasil/Projects/airtable-jdbc/src/main/java/danielmelobrasil/airtable/jdbc/AirtableQuery.java
+/Users/danielbrasil/Projects/airtable-jdbc/src/main/java/danielmelobrasil/airtable/jdbc/AirtableDriver.java
+/Users/danielbrasil/Projects/airtable-jdbc/src/main/java/danielmelobrasil/airtable/jdbc/AirtableApiClient.java
+/Users/danielbrasil/Projects/airtable-jdbc/src/main/java/danielmelobrasil/airtable/jdbc/AirtableResultSetMetaData.java
