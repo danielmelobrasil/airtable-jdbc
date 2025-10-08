@@ -75,6 +75,30 @@ public class AirtableSqlParserTest {
     }
 
     @Test
+    public void parseSqlWithNewlines() throws Exception {
+        AirtableQuery query = AirtableSqlParser.parse(
+                "SELECT\n" +
+                        "    c.Name,\n" +
+                        "    c.Email\n" +
+                        "FROM\n" +
+                        "    Contacts AS c\n" +
+                        "LEFT JOIN\n" +
+                        "    Organizations AS o ON (c.OrgId = o.Id)\n" +
+                        "WHERE\n" +
+                        "    c.Status = 'Active'\n" +
+                        "ORDER BY\n" +
+                        "    c.Name ASC"
+        );
+
+        assertEquals("Contacts", query.getTableName());
+        assertTrue(query.getJoin().isPresent());
+        assertTrue(query.getFilterFormula().isPresent());
+        assertEquals("{Status} = 'Active'", query.getFilterFormula().get());
+        assertEquals(1, query.getSorts().size());
+        assertEquals("Name", query.getSorts().get(0).getField());
+    }
+
+    @Test
     public void parseSelectWithLeftJoin() throws Exception {
         AirtableQuery query = AirtableSqlParser.parse(
                 "SELECT Contacts.Name AS contact_name, Organizations.Name AS org_name " +

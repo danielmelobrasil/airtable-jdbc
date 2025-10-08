@@ -259,16 +259,16 @@ class AirtableApiClient {
                     continue;
                 }
                 Map<String, Object> row = new LinkedHashMap<>();
-                Object idObj = recordMap.get("id");
-                if (idObj != null) {
-                    row.put("id", stringValue(idObj));
-                }
-                for (Map.Entry<?, ?> entry : ((Map<?, ?>) fieldsObj).entrySet()) {
-                    row.put(String.valueOf(entry.getKey()), entry.getValue());
-                }
-                records.add(row);
+            Object idObj = recordMap.get("id");
+            if (idObj != null) {
+                row.put("id", stringValue(idObj));
             }
-            response.records = records;
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) fieldsObj).entrySet()) {
+                row.put(String.valueOf(entry.getKey()), normaliseFieldValue(entry.getValue()));
+            }
+            records.add(row);
+        }
+        response.records = records;
         }
 
         Object offsetObj = map.get("offset");
@@ -323,6 +323,46 @@ class AirtableApiClient {
 
     private static String stringValue(Object value) {
         return value != null ? String.valueOf(value) : null;
+    }
+
+    private static Object normaliseFieldValue(Object value) {
+        if (value == null) {
+            return null;
+        }
+
+        if (value instanceof Map) {
+            Map<?, ?> map = (Map<?, ?>) value;
+            Object email = map.get("email");
+            if (email != null) {
+                return String.valueOf(email);
+            }
+            return value;
+        }
+
+        if (value instanceof List) {
+            List<?> list = (List<?>) value;
+            if (list.isEmpty()) {
+                return Collections.emptyList();
+            }
+            boolean allEmailMaps = true;
+            List<String> emails = new ArrayList<>();
+            for (Object element : list) {
+                if (element instanceof Map) {
+                    Object email = ((Map<?, ?>) element).get("email");
+                    if (email != null) {
+                        emails.add(String.valueOf(email));
+                        continue;
+                    }
+                }
+                allEmailMaps = false;
+                break;
+            }
+            if (allEmailMaps && !emails.isEmpty()) {
+                return String.join(", ", emails);
+            }
+        }
+
+        return value;
     }
 
     static final class MetaTablesResponse {

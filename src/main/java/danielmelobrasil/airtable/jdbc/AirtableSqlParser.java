@@ -39,6 +39,7 @@ final class AirtableSqlParser {
             throw new AirtableSqlParseException("SQL cannot be null.");
         }
         String trimmed = sql.trim();
+        trimmed = trimmed.replaceAll("\\s+", " ");
         if (trimmed.endsWith(";")) {
             trimmed = trimmed.substring(0, trimmed.length() - 1);
         }
@@ -115,11 +116,9 @@ final class AirtableSqlParser {
             expression = asMatcher.group(1).trim();
             alias = asMatcher.group(2).trim();
         } else {
-            String[] parts = expression.split("\\s+");
-            if (parts.length > 1) {
-                expression = parts[0];
-                alias = parts[1];
-            }
+            SplitExpression split = splitExpressionAndAlias(expression);
+            expression = split.expression;
+            alias = split.alias;
         }
 
         FieldReference reference = parseFieldReference(expression);
@@ -574,5 +573,48 @@ final class AirtableSqlParser {
             value = value.substring(1, value.length() - 1);
         }
         return value;
+    }
+
+    private static SplitExpression splitExpressionAndAlias(String expression) {
+        SplitExpression result = new SplitExpression();
+        result.expression = expression;
+        result.alias = null;
+
+        int length = expression.length();
+        boolean inSingle = false;
+        boolean inDouble = false;
+        boolean inBacktick = false;
+
+        for (int i = 0; i < length; i++) {
+            char ch = expression.charAt(i);
+            if (ch == '`' && !inSingle && !inDouble) {
+                inBacktick = !inBacktick;
+                continue;
+            }
+            if (ch == '\'' && !inDouble && !inBacktick) {
+                inSingle = !inSingle;
+                continue;
+            }
+            if (ch == '"' && !inSingle && !inBacktick) {
+                inDouble = !inDouble;
+                continue;
+            }
+            if (Character.isWhitespace(ch) && !inSingle && !inDouble && !inBacktick) {
+                String before = expression.substring(0, i).trim();
+                String after = expression.substring(i).trim();
+                if (!before.isEmpty() && !after.isEmpty()) {
+                    result.expression = before;
+                    result.alias = after;
+                }
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    private static final class SplitExpression {
+        private String expression;
+        private String alias;
     }
 }

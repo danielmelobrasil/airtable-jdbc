@@ -15,7 +15,7 @@ import static org.junit.Assert.assertNotNull;
  */
 public class AirtableIntegrationTest {
 
-    private static final String TABLE_QUERY = "SELECT p.Plano, t.Tarefa FROM `Planos de Ação` as p LEFT JOIN `Tarefas` t ON (p.id = t.`Planos de Ação`) WHERE p.id = ?";
+    private static final String TABLE_QUERY = "SELECT p.Plano, t.Tarefa, t.`Agrupamento (Plano de Ação)`, t.`Responsáveis` FROM `Planos de Ação` as p LEFT JOIN `Tarefas` t ON (p.id = t.`Planos de Ação`) WHERE p.id = ?";
 
     @Test
     public void queryPlanosDeAcao() throws Exception {
