@@ -40,6 +40,41 @@ public class AirtableSqlParserTest {
     }
 
     @Test
+    public void parseSelectWithTableAlias() throws Exception {
+        AirtableQuery query = AirtableSqlParser.parse(
+                "SELECT c.Name FROM Contacts AS c WHERE c.Status = 'Active'"
+        );
+
+        assertEquals("Contacts", query.getTableName());
+        assertEquals(1, query.getSelectedFields().size());
+        AirtableQuery.SelectedField field = query.getSelectedFields().get(0);
+        assertEquals("Name", field.getField());
+        assertEquals("c.Name", field.getLabel());
+        assertTrue(query.getFilterFormula().isPresent());
+        assertEquals("{Status} = 'Active'", query.getFilterFormula().get());
+    }
+
+    @Test
+    public void parseWhereOnRecordId() throws Exception {
+        AirtableQuery query = AirtableSqlParser.parse(
+                "SELECT Name FROM Contacts WHERE id = 'rec123'"
+        );
+
+        assertTrue(query.getFilterFormula().isPresent());
+        assertEquals("RECORD_ID() = 'rec123'", query.getFilterFormula().get());
+    }
+
+    @Test
+    public void parseWhereOnAliasedRecordId() throws Exception {
+        AirtableQuery query = AirtableSqlParser.parse(
+                "SELECT c.Name FROM Contacts c WHERE c.id = 'recABC'"
+        );
+
+        assertTrue(query.getFilterFormula().isPresent());
+        assertEquals("RECORD_ID() = 'recABC'", query.getFilterFormula().get());
+    }
+
+    @Test
     public void parseSelectWithLeftJoin() throws Exception {
         AirtableQuery query = AirtableSqlParser.parse(
                 "SELECT Contacts.Name AS contact_name, Organizations.Name AS org_name " +
@@ -87,5 +122,23 @@ public class AirtableSqlParserTest {
                 "SELECT Contacts.Name, Organizations.Name FROM Contacts LEFT JOINT Organizations ON Contacts.OrgId = Organizations.Id"
         );
         assertTrue(query.getJoin().isPresent());
+    }
+
+    @Test
+    public void parseSelectWithJoinAliases() throws Exception {
+        AirtableQuery query = AirtableSqlParser.parse(
+                "SELECT c.Name, o.Name FROM Contacts c LEFT JOIN Organizations AS o ON c.OrgId = o.Id"
+        );
+
+        assertEquals("Contacts", query.getTableName());
+        assertTrue(query.getJoin().isPresent());
+        AirtableQuery.Join join = query.getJoin().get();
+        assertEquals("Organizations", join.getTableName());
+        assertEquals("OrgId", join.getLeftField());
+        assertEquals("Id", join.getRightField());
+
+        assertEquals(2, query.getSelectedFields().size());
+        assertEquals("c.Name", query.getSelectedFields().get(0).getLabel());
+        assertEquals("o.Name", query.getSelectedFields().get(1).getLabel());
     }
 }

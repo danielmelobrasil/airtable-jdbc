@@ -53,6 +53,7 @@ final class AirtableConfig {
 
         String apiKey = firstNonEmpty(
                 params.get("apiKey"),
+                uri.getUserInfo(),
                 info != null ? info.getProperty("apiKey") : null
         );
         if (apiKey == null) {
@@ -81,7 +82,9 @@ final class AirtableConfig {
 
     private static URI parseUri(String connectionPart) throws SQLException {
         String candidate = connectionPart;
-        if (!candidate.startsWith("airtable://")) {
+        if (candidate.startsWith("//")) {
+            candidate = "airtable:" + candidate;
+        } else if (!candidate.startsWith("airtable://")) {
             candidate = "airtable://" + candidate;
         }
         try {
@@ -146,7 +149,7 @@ final class AirtableConfig {
         }
         String path = uri.getPath();
         if (path != null && path.length() > 1) {
-            return path.startsWith("/") ? path.substring(1) : path;
+            return path.replaceFirst("^/+", "");
         }
 
         return firstNonEmpty(

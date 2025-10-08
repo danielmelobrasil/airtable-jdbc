@@ -3,8 +3,11 @@ package danielmelobrasil.airtable.jdbc;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.sql.DatabaseMetaData;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -65,6 +68,42 @@ public class AirtableStatementTest {
     }
 
     @Test
+    public void executeQuerySupportsTableAlias() throws Exception {
+        apiClient.addRecord(record("Name", "Alice"));
+
+        ResultSet rs = connection.createStatement()
+                .executeQuery("SELECT c.Name FROM Contacts AS c");
+
+        assertNotNull(apiClient.getLastQuery());
+        assertEquals("Contacts", apiClient.getLastQuery().getTableName());
+        assertEquals(1, apiClient.getLastQuery().getSelectedFields().size());
+        assertEquals("Name", apiClient.getLastQuery().getSelectedFields().get(0).getField());
+
+        assertTrue(rs.next());
+        assertEquals("Alice", rs.getString(1));
+        assertEquals("c.Name", rs.getMetaData().getColumnLabel(1));
+        assertFalse(rs.next());
+    }
+
+    @Test
+    public void preparedStatementBindsParameters() throws Exception {
+        apiClient.addRecord(record("Name", "Alice"));
+
+        try (PreparedStatement ps = connection.prepareStatement("SELECT Name FROM Contacts WHERE Name = ?")) {
+            ps.setString(1, "Alice");
+
+            try (ResultSet rs = ps.executeQuery()) {
+                assertNotNull(apiClient.getLastQuery());
+                assertEquals("{Name} = 'Alice'", apiClient.getLastQuery().getFilterFormula().get());
+
+                assertTrue(rs.next());
+                assertEquals("Alice", rs.getString(1));
+                assertFalse(rs.next());
+            }
+        }
+    }
+
+    @Test
     public void leftJoinProducesCombinedRows() throws Exception {
         Map<String, Object> baseRecord = new LinkedHashMap<>();
         baseRecord.put("Name", "Alice");
@@ -89,6 +128,40 @@ public class AirtableStatementTest {
         assertFalse(rs.next());
     }
 
+    @Test
+    public void getMetaDataReturnsTablesAndColumns() throws Exception {
+        apiClient.addMetaTable("Contacts",
+                fieldMeta("Name", "singleLineText"),
+                fieldMeta("Status", "singleSelect"));
+
+        DatabaseMetaData metaData = connection.getMetaData();
+        assertNotNull(metaData);
+
+        try (ResultSet tables = metaData.getTables(null, null, "Con%", null)) {
+            System.out.println("MetaData tables:");
+            assertTrue(tables.next());
+            assertEquals("Contacts", tables.getString("TABLE_NAME"));
+            assertEquals("TABLE", tables.getString("TABLE_TYPE"));
+            System.out.println("- " + tables.getString("TABLE_NAME") + " (" + tables.getString("TABLE_TYPE") + ")");
+            assertFalse(tables.next());
+        }
+
+        try (ResultSet columns = metaData.getColumns(null, null, "Contacts", "%")) {
+            System.out.println("Columns for Contacts:");
+            assertTrue(columns.next());
+            assertEquals("Contacts", columns.getString("TABLE_NAME"));
+            assertEquals("Name", columns.getString("COLUMN_NAME"));
+            assertEquals("VARCHAR", columns.getString("TYPE_NAME"));
+            System.out.println("- " + columns.getString("COLUMN_NAME") + " : " + columns.getString("TYPE_NAME"));
+
+            assertTrue(columns.next());
+            assertEquals("Status", columns.getString("COLUMN_NAME"));
+            assertEquals("VARCHAR", columns.getString("TYPE_NAME"));
+            System.out.println("- " + columns.getString("COLUMN_NAME") + " : " + columns.getString("TYPE_NAME"));
+            assertFalse(columns.next());
+        }
+    }
+
     private static Map<String, Object> record(String key, Object value) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put(key, value);
@@ -99,6 +172,7 @@ public class AirtableStatementTest {
 
         private final List<Map<String, Object>> records = new ArrayList<>();
         private final List<Map<String, Object>> joinRecords = new ArrayList<>();
+        private final List<MetaTable> metadataTables = new ArrayList<>();
         private AirtableQuery lastQuery;
         private AirtableQuery lastJoinQuery;
 
@@ -126,6 +200,19 @@ public class AirtableStatementTest {
             return new ArrayList<>(joinRecords);
         }
 
+        void addMetaTable(String name, MetaField... fields) {
+            MetaTable table = new MetaTable();
+            table.name = name;
+            table.fields = new ArrayList<>();
+            Collections.addAll(table.fields, fields);
+            metadataTables.add(table);
+        }
+
+        @Override
+        List<MetaTable> fetchTablesMetadata() {
+            return new ArrayList<>(metadataTables);
+        }
+
         AirtableQuery getLastQuery() {
             return lastQuery;
         }
@@ -133,5 +220,12 @@ public class AirtableStatementTest {
         AirtableQuery getLastJoinQuery() {
             return lastJoinQuery;
         }
+    }
+
+    private static AirtableApiClient.MetaField fieldMeta(String name, String type) {
+        AirtableApiClient.MetaField field = new AirtableApiClient.MetaField();
+        field.name = name;
+        field.type = type;
+        return field;
     }
 }

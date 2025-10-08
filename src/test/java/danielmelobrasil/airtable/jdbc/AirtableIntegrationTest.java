@@ -15,15 +15,16 @@ import static org.junit.Assert.assertNotNull;
  */
 public class AirtableIntegrationTest {
 
-    private static final String BASE_ID = "appmmRRZgZ3xSTwB6";
     private static final String TABLE_QUERY = "SELECT p.Plano, t.Tarefa FROM `Planos de Ação` as p LEFT JOIN `Tarefas` t ON (p.id = t.`Planos de Ação`) WHERE p.id = ?";
 
     @Test
     public void queryPlanosDeAcao() throws Exception {
         String apiKey = System.getenv("AIRTABLE_API_KEY");
         Assume.assumeTrue("AIRTABLE_API_KEY environment variable must be set to run this test.", apiKey != null && !apiKey.isEmpty());
+        String baseId = System.getenv("AIRTABLE_BASE_ID");
+        Assume.assumeTrue("AIRTABLE_BASE_ID environment variable must be set to run this test.", baseId != null && !baseId.isEmpty());
 
-        String url = "jdbc:airtable://" + apiKey + "@" + BASE_ID;
+        String url = "jdbc:airtable://" + apiKey + "@" + baseId;
 
         try (Connection connection = DriverManager.getConnection(url);
              java.sql.PreparedStatement ps = connection.prepareStatement(TABLE_QUERY)) {

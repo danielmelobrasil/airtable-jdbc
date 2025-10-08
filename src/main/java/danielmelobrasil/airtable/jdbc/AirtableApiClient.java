@@ -1,11 +1,5 @@
 package danielmelobrasil.airtable.jdbc;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -20,11 +14,12 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.StringJoiner;
 import java.util.Optional;
+import java.util.StringJoiner;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -34,8 +29,6 @@ import java.util.logging.Logger;
 class AirtableApiClient {
 
     private static final Logger LOGGER = Logger.getLogger(AirtableApiClient.class.getName());
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper(new JsonFactory().enable(JsonParser.Feature.AUTO_CLOSE_SOURCE));
-    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<Map<String, Object>>() {};
 
     private final AirtableConfig config;
 
@@ -71,6 +64,33 @@ class AirtableApiClient {
         );
     }
 
+    List<MetaTable> fetchTablesMetadata() throws SQLException {
+        HttpURLConnection connection = null;
+        String url = buildTablesMetadataUrl();
+        try {
+            connection = openConnection(url, config.getTimeout());
+            int status = connection.getResponseCode();
+            String body = readResponseBody(connection, status);
+
+            if (status >= 200 && status < 300) {
+                MetaTablesResponse response = parseMetaTables(body);
+                if (response.tables == null) {
+                    return Collections.emptyList();
+                }
+                return response.tables;
+            }
+
+            LOGGER.log(Level.WARNING, "Airtable metadata request failed. Status: {0}, Body: {1}, URL: {2}", new Object[]{status, body, url});
+            throw new SQLException("Airtable metadata request failed with status " + status + ": " + body);
+        } catch (IOException ex) {
+            throw new SQLException("Unable to fetch metadata from Airtable API.", ex);
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
     private HttpURLConnection openConnection(String url, Duration timeout) throws IOException {
         URL endpoint = new URL(url);
         HttpURLConnection connection = (HttpURLConnection) endpoint.openConnection();
@@ -90,26 +110,36 @@ class AirtableApiClient {
             List<AirtableQuery.Sort> sorts,
             Optional<String> view
     ) throws SQLException {
-        HttpURLConnection connection = null;
-        try {
-            String url = buildSelectUrl(tableName, selectedFields, filterFormula, maxRecords, sorts, view);
-            connection = openConnection(url, config.getTimeout());
-            int status = connection.getResponseCode();
-            String body = readResponseBody(connection, status);
+        List<Map<String, Object>> allRecords = new ArrayList<>();
+        String offset = null;
 
-            if (status >= 200 && status < 300) {
-                return parseRecords(body);
-            }
+        do {
+            HttpURLConnection connection = null;
+            String url = null;
+            try {
+                url = buildSelectUrl(tableName, selectedFields, filterFormula, maxRecords, sorts, view, Optional.ofNullable(offset));
+                connection = openConnection(url, config.getTimeout());
+                int status = connection.getResponseCode();
+                String body = readResponseBody(connection, status);
 
-            LOGGER.log(Level.WARNING, "Airtable API request failed. Status: {0}, Body: {1}", new Object[]{status, body});
-            throw new SQLException("Airtable API request failed with status " + status + ": " + body);
-        } catch (IOException ex) {
-            throw new SQLException("Unable to execute request against Airtable API.", ex);
-        } finally {
-            if (connection != null) {
-                connection.disconnect();
+                if (status >= 200 && status < 300) {
+                    RecordsResponse response = parseRecordsResponse(body);
+                    allRecords.addAll(response.records);
+                    offset = response.offset;
+                } else {
+                    LOGGER.log(Level.WARNING, "Airtable API request failed. Status: {0}, Body: {1}, URL: {2}", new Object[]{status, body, url});
+                    throw new SQLException("Airtable API request failed with status " + status + ": " + body);
+                }
+            } catch (IOException ex) {
+                throw new SQLException("Unable to execute request against Airtable API.", ex);
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
             }
-        }
+        } while (offset != null && !offset.isEmpty());
+
+        return allRecords;
     }
 
     private String buildSelectUrl(
@@ -118,15 +148,14 @@ class AirtableApiClient {
             Optional<String> filterFormula,
             Optional<Integer> maxRecords,
             List<AirtableQuery.Sort> sorts,
-            Optional<String> view
+            Optional<String> view,
+            Optional<String> offset
     ) throws UnsupportedEncodingException {
         StringBuilder url = new StringBuilder();
-        url.append(config.getApiBaseUrl());
-        if (!config.getApiBaseUrl().endsWith("/")) {
-            url.append('/');
-        }
+        String baseUrl = config.getApiBaseUrl().replaceAll("/+$", "");
+        url.append(baseUrl).append('/');
         url.append(config.getBaseId()).append('/');
-        url.append(encodeComponent(tableName));
+        url.append(encodePathSegment(tableName));
 
         Map<String, List<String>> params = new HashMap<>();
 
@@ -156,6 +185,12 @@ class AirtableApiClient {
             url.append('?').append(encodeQueryParameters(params));
         }
 
+        if (offset.isPresent()) {
+            url.append(params.isEmpty() ? '?' : '&')
+                    .append("offset=")
+                    .append(encodeComponent(offset.get()));
+        }
+
         return url.toString();
     }
 
@@ -174,6 +209,15 @@ class AirtableApiClient {
         return URLEncoder.encode(value, StandardCharsets.UTF_8.name());
     }
 
+    private static String encodePathSegment(String value) throws UnsupportedEncodingException {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20");
+    }
+
+    private String buildTablesMetadataUrl() {
+        String baseUrl = config.getApiBaseUrl().replaceAll("/+$", "");
+        return baseUrl + "/meta/bases/" + config.getBaseId() + "/tables";
+    }
+
     private static String readResponseBody(HttpURLConnection connection, int status) throws IOException {
         InputStream stream = status >= 200 && status < 300 ? connection.getInputStream() : connection.getErrorStream();
         if (stream == null) {
@@ -190,23 +234,115 @@ class AirtableApiClient {
         }
     }
 
-    private List<Map<String, Object>> parseRecords(String body) throws IOException {
-        JsonNode node = OBJECT_MAPPER.readTree(body);
-        JsonNode recordsNode = node.get("records");
-        if (recordsNode == null || !recordsNode.isArray()) {
-            return Collections.emptyList();
+    private RecordsResponse parseRecordsResponse(String body) throws IOException {
+        Object json = SimpleJsonParser.parse(body);
+        RecordsResponse response = new RecordsResponse();
+        if (!(json instanceof Map)) {
+            response.records = Collections.emptyList();
+            response.offset = null;
+            return response;
+        }
+        Map<?, ?> map = (Map<?, ?>) json;
+        Object recordsObj = map.get("records");
+        if (!(recordsObj instanceof List)) {
+            response.records = Collections.emptyList();
+        } else {
+            List<Map<String, Object>> records = new ArrayList<>();
+            for (Object recordObj : (List<?>) recordsObj) {
+                if (!(recordObj instanceof Map)) {
+                    continue;
+                }
+                Map<?, ?> recordMap = (Map<?, ?>) recordObj;
+                Object fieldsObj = recordMap.get("fields");
+                if (!(fieldsObj instanceof Map)) {
+                    records.add(Collections.<String, Object>emptyMap());
+                    continue;
+                }
+                Map<String, Object> row = new LinkedHashMap<>();
+                Object idObj = recordMap.get("id");
+                if (idObj != null) {
+                    row.put("id", stringValue(idObj));
+                }
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) fieldsObj).entrySet()) {
+                    row.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+                records.add(row);
+            }
+            response.records = records;
         }
 
-        List<Map<String, Object>> records = new ArrayList<>();
-        for (JsonNode recordNode : recordsNode) {
-            JsonNode fieldsNode = recordNode.get("fields");
-            if (fieldsNode == null || fieldsNode.isNull()) {
-                records.add(Collections.<String, Object>emptyMap());
-            } else {
-                Map<String, Object> fields = OBJECT_MAPPER.convertValue(fieldsNode, MAP_TYPE);
-                records.add(fields);
-            }
+        Object offsetObj = map.get("offset");
+        response.offset = offsetObj != null ? String.valueOf(offsetObj) : null;
+        return response;
+    }
+
+    private MetaTablesResponse parseMetaTables(String body) throws IOException {
+        Object json = SimpleJsonParser.parse(body);
+        MetaTablesResponse response = new MetaTablesResponse();
+        if (!(json instanceof Map)) {
+            response.tables = Collections.emptyList();
+            return response;
         }
-        return records;
+        Object tablesObj = ((Map<?, ?>) json).get("tables");
+        if (!(tablesObj instanceof List)) {
+            response.tables = Collections.emptyList();
+            return response;
+        }
+
+        List<MetaTable> tables = new ArrayList<>();
+        for (Object tableObj : (List<?>) tablesObj) {
+            if (!(tableObj instanceof Map)) {
+                continue;
+            }
+            Map<?, ?> tableMap = (Map<?, ?>) tableObj;
+            MetaTable table = new MetaTable();
+            table.id = stringValue(tableMap.get("id"));
+            table.name = stringValue(tableMap.get("name"));
+
+            Object fieldsObj = tableMap.get("fields");
+            if (fieldsObj instanceof List) {
+                List<MetaField> fields = new ArrayList<>();
+                for (Object fieldObj : (List<?>) fieldsObj) {
+                    if (!(fieldObj instanceof Map)) {
+                        continue;
+                    }
+                    Map<?, ?> fieldMap = (Map<?, ?>) fieldObj;
+                    MetaField field = new MetaField();
+                    field.id = stringValue(fieldMap.get("id"));
+                    field.name = stringValue(fieldMap.get("name"));
+                    field.type = stringValue(fieldMap.get("type"));
+                    fields.add(field);
+                }
+                table.fields = fields;
+            }
+            tables.add(table);
+        }
+        response.tables = tables;
+        return response;
+    }
+
+    private static String stringValue(Object value) {
+        return value != null ? String.valueOf(value) : null;
+    }
+
+    static final class MetaTablesResponse {
+        public List<MetaTable> tables;
+    }
+
+    static final class MetaTable {
+        public String id;
+        public String name;
+        public List<MetaField> fields;
+    }
+
+    static final class MetaField {
+        public String id;
+        public String name;
+        public String type;
+    }
+
+    static final class RecordsResponse {
+        List<Map<String, Object>> records = Collections.emptyList();
+        String offset;
     }
 }

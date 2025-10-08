@@ -6,6 +6,14 @@ import java.sql.ResultSet;
 import java.sql.RowIdLifetime;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
+import java.sql.Types;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * Minimal {@link DatabaseMetaData} implementation.
@@ -13,6 +21,7 @@ import java.sql.SQLFeatureNotSupportedException;
 class AirtableDatabaseMetaData implements DatabaseMetaData {
 
     private final AirtableConnection connection;
+    private volatile List<AirtableApiClient.MetaTable> tablesCache;
 
     AirtableDatabaseMetaData(AirtableConnection connection) {
         this.connection = connection;
@@ -620,27 +629,153 @@ class AirtableDatabaseMetaData implements DatabaseMetaData {
 
     @Override
     public ResultSet getTables(String catalog, String schemaPattern, String tableNamePattern, String[] types) throws SQLException {
-        throw new SQLFeatureNotSupportedException("Metadata lookup is not supported.");
+        List<AirtableApiClient.MetaTable> tables = getTablesMetadata();
+        String tablePattern = tableNamePattern != null ? tableNamePattern : "%";
+        String typeFilter = (types == null || types.length == 0) ? null : types[0];
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (AirtableApiClient.MetaTable table : tables) {
+            if (!matchesPattern(table.name, tablePattern)) {
+                continue;
+            }
+            if (typeFilter != null && !"TABLE".equalsIgnoreCase(typeFilter)) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("TABLE_CAT", null);
+            row.put("TABLE_SCHEM", null);
+            row.put("TABLE_NAME", table.name);
+            row.put("TABLE_TYPE", "TABLE");
+            row.put("REMARKS", "");
+            row.put("TYPE_CAT", null);
+            row.put("TYPE_SCHEM", null);
+            row.put("TYPE_NAME", null);
+            row.put("SELF_REFERENCING_COL_NAME", null);
+            row.put("REF_GENERATION", null);
+            rows.add(row);
+        }
+
+        List<String> columns = Arrays.asList(
+                "TABLE_CAT",
+                "TABLE_SCHEM",
+                "TABLE_NAME",
+                "TABLE_TYPE",
+                "REMARKS",
+                "TYPE_CAT",
+                "TYPE_SCHEM",
+                "TYPE_NAME",
+                "SELF_REFERENCING_COL_NAME",
+                "REF_GENERATION"
+        );
+
+        return new AirtableResultSet(new AirtableStatement(connection), rows, columns);
     }
 
     @Override
     public ResultSet getSchemas() throws SQLException {
-        throw new SQLFeatureNotSupportedException("Schemas are not supported.");
+        List<Map<String, Object>> rows = Collections.emptyList();
+        List<String> columns = Arrays.asList("TABLE_SCHEM", "TABLE_CATALOG");
+        return createResultSet(rows, columns);
     }
 
     @Override
     public ResultSet getCatalogs() throws SQLException {
-        throw new SQLFeatureNotSupportedException("Catalogs are not supported.");
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("TABLE_CAT", connection.getConfig().getBaseId());
+        List<Map<String, Object>> rows = Collections.singletonList(row);
+        List<String> columns = Collections.singletonList("TABLE_CAT");
+        return createResultSet(rows, columns);
     }
 
     @Override
     public ResultSet getTableTypes() throws SQLException {
-        throw new SQLFeatureNotSupportedException("Table types are not supported.");
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("TABLE_TYPE", "TABLE");
+        List<Map<String, Object>> rows = Collections.singletonList(row);
+        List<String> columns = Collections.singletonList("TABLE_TYPE");
+        return createResultSet(rows, columns);
     }
 
     @Override
     public ResultSet getColumns(String catalog, String schemaPattern, String tableNamePattern, String columnNamePattern) throws SQLException {
-        throw new SQLFeatureNotSupportedException("Metadata lookup is not supported.");
+        List<AirtableApiClient.MetaTable> tables = getTablesMetadata();
+        String tablePattern = tableNamePattern != null ? tableNamePattern : "%";
+        String columnPattern = columnNamePattern != null ? columnNamePattern : "%";
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (AirtableApiClient.MetaTable table : tables) {
+            if (!matchesPattern(table.name, tablePattern)) {
+                continue;
+            }
+            if (table.fields == null) {
+                continue;
+            }
+            int ordinal = 1;
+            for (AirtableApiClient.MetaField field : table.fields) {
+                if (!matchesPattern(field.name, columnPattern)) {
+                    ordinal++;
+                    continue;
+                }
+
+                SqlTypeInfo typeInfo = mapFieldType(field.type);
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("TABLE_CAT", null);
+                row.put("TABLE_SCHEM", null);
+                row.put("TABLE_NAME", table.name);
+                row.put("COLUMN_NAME", field.name);
+                row.put("DATA_TYPE", typeInfo.jdbcType);
+                row.put("TYPE_NAME", typeInfo.typeName);
+                row.put("COLUMN_SIZE", typeInfo.columnSize);
+                row.put("BUFFER_LENGTH", null);
+                row.put("DECIMAL_DIGITS", typeInfo.decimalDigits);
+                row.put("NUM_PREC_RADIX", typeInfo.radix);
+                row.put("NULLABLE", DatabaseMetaData.columnNullable);
+                row.put("REMARKS", "");
+                row.put("COLUMN_DEF", null);
+                row.put("SQL_DATA_TYPE", null);
+                row.put("SQL_DATETIME_SUB", null);
+                row.put("CHAR_OCTET_LENGTH", typeInfo.charOctetLength);
+                row.put("ORDINAL_POSITION", ordinal);
+                row.put("IS_NULLABLE", "YES");
+                row.put("SCOPE_CATALOG", null);
+                row.put("SCOPE_SCHEMA", null);
+                row.put("SCOPE_TABLE", null);
+                row.put("SOURCE_DATA_TYPE", null);
+                row.put("IS_AUTOINCREMENT", "NO");
+                row.put("IS_GENERATEDCOLUMN", typeInfo.generated ? "YES" : "NO");
+                rows.add(row);
+                ordinal++;
+            }
+        }
+
+        List<String> columns = Arrays.asList(
+                "TABLE_CAT",
+                "TABLE_SCHEM",
+                "TABLE_NAME",
+                "COLUMN_NAME",
+                "DATA_TYPE",
+                "TYPE_NAME",
+                "COLUMN_SIZE",
+                "BUFFER_LENGTH",
+                "DECIMAL_DIGITS",
+                "NUM_PREC_RADIX",
+                "NULLABLE",
+                "REMARKS",
+                "COLUMN_DEF",
+                "SQL_DATA_TYPE",
+                "SQL_DATETIME_SUB",
+                "CHAR_OCTET_LENGTH",
+                "ORDINAL_POSITION",
+                "IS_NULLABLE",
+                "SCOPE_CATALOG",
+                "SCOPE_SCHEMA",
+                "SCOPE_TABLE",
+                "SOURCE_DATA_TYPE",
+                "IS_AUTOINCREMENT",
+                "IS_GENERATEDCOLUMN"
+        );
+
+        return new AirtableResultSet(new AirtableStatement(connection), rows, columns);
     }
 
     @Override
@@ -665,7 +800,16 @@ class AirtableDatabaseMetaData implements DatabaseMetaData {
 
     @Override
     public ResultSet getPrimaryKeys(String catalog, String schema, String table) throws SQLException {
-        throw new SQLFeatureNotSupportedException("Primary keys metadata is not supported.");
+        List<Map<String, Object>> rows = Collections.emptyList();
+        List<String> columns = Arrays.asList(
+                "TABLE_CAT",
+                "TABLE_SCHEM",
+                "TABLE_NAME",
+                "COLUMN_NAME",
+                "KEY_SEQ",
+                "PK_NAME"
+        );
+        return createResultSet(rows, columns);
     }
 
     @Override
@@ -886,6 +1030,119 @@ class AirtableDatabaseMetaData implements DatabaseMetaData {
     @Override
     public boolean generatedKeyAlwaysReturned() {
         return false;
+    }
+
+    private static boolean matchesPattern(String value, String pattern) {
+        if (pattern == null) {
+            return true;
+        }
+        if ("%".equals(pattern)) {
+            return true;
+        }
+        if (value == null) {
+            return false;
+        }
+        String regex = "^" + pattern
+                .replace("\\", "\\\\")
+                .replace(".", "\\.")
+                .replace("_", ".")
+                .replace("%", ".*") + "$";
+        return value.matches(regex);
+    }
+
+    private List<AirtableApiClient.MetaTable> getTablesMetadata() throws SQLException {
+        List<AirtableApiClient.MetaTable> snapshot = tablesCache;
+        if (snapshot != null) {
+            return snapshot;
+        }
+        synchronized (this) {
+            if (tablesCache == null) {
+                tablesCache = Collections.unmodifiableList(connection.getApiClient().fetchTablesMetadata());
+            }
+            return tablesCache;
+        }
+    }
+
+    private static SqlTypeInfo mapFieldType(String airtableType) {
+        String type = airtableType != null ? airtableType.toLowerCase(Locale.ENGLISH) : "singlelinetext";
+        switch (type) {
+            case "number":
+            case "percent":
+            case "currency":
+            case "rating":
+            case "duration":
+                return SqlTypeInfo.numeric(Types.DOUBLE, "DOUBLE", false);
+            case "count":
+            case "rollup":
+            case "formula":
+                return SqlTypeInfo.numeric(Types.DOUBLE, "DOUBLE", true);
+            case "checkbox":
+                return SqlTypeInfo.simple(Types.BOOLEAN, "BOOLEAN", false);
+            case "date":
+            case "datewithtimezone":
+                return SqlTypeInfo.simple(Types.DATE, "DATE", false);
+            case "datetime":
+            case "datetimewithtimezone":
+            case "lastmodifiedtime":
+            case "createdtime":
+                return SqlTypeInfo.simple(Types.TIMESTAMP, "TIMESTAMP", true);
+            case "autonumber":
+            case "integer":
+                return SqlTypeInfo.numeric(Types.BIGINT, "BIGINT", true);
+            case "lookup":
+                return SqlTypeInfo.variable(Types.VARCHAR, "VARCHAR", null, true);
+            case "email":
+            case "phonenumber":
+            case "url":
+            case "attachments":
+            case "barcode":
+            case "singlelinetext":
+            case "multilinetext":
+            case "singleselect":
+            case "multipleselects":
+            case "richtext":
+            default:
+                return SqlTypeInfo.variable(Types.VARCHAR, "VARCHAR", null, false);
+        }
+    }
+
+    private static final class SqlTypeInfo {
+        final int jdbcType;
+        final String typeName;
+        final Integer columnSize;
+        final Integer decimalDigits;
+        final Integer radix;
+        final Integer charOctetLength;
+        final boolean generated;
+
+        private SqlTypeInfo(int jdbcType, String typeName, Integer columnSize, Integer decimalDigits, Integer radix, Integer charOctetLength, boolean generated) {
+            this.jdbcType = jdbcType;
+            this.typeName = typeName;
+            this.columnSize = columnSize;
+            this.decimalDigits = decimalDigits;
+            this.radix = radix;
+            this.charOctetLength = charOctetLength;
+            this.generated = generated;
+        }
+
+        static SqlTypeInfo simple(int jdbcType, String typeName, boolean generated) {
+            return new SqlTypeInfo(jdbcType, typeName, null, null, null, null, generated);
+        }
+
+        static SqlTypeInfo numeric(int jdbcType, String typeName, boolean generated) {
+            return new SqlTypeInfo(jdbcType, typeName, null, null, 10, null, generated);
+        }
+
+        static SqlTypeInfo variable(int jdbcType, String typeName, Integer columnSize, boolean generated) {
+            Integer size = columnSize != null ? columnSize : 255;
+            return new SqlTypeInfo(jdbcType, typeName, size, null, null, size, generated);
+        }
+    }
+
+    private ResultSet createResultSet(List<Map<String, Object>> rows, List<String> columns) throws SQLException {
+        List<Map<String, Object>> data = new ArrayList<>(rows);
+        List<String> columnOrder = new ArrayList<>(columns);
+        return new AirtableResultSet(new AirtableStatement(connection), data, columnOrder);
     }
 
     @Override

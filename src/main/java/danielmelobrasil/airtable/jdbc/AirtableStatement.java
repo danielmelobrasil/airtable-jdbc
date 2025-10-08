@@ -74,27 +74,37 @@ class AirtableStatement implements Statement {
 
     private List<Map<String, Object>> mergeJoinIfNeeded(AirtableQuery query, List<Map<String, Object>> baseRecords) throws SQLException {
         if (!query.getJoin().isPresent()) {
-            return baseRecords;
+            List<Map<String, Object>> rows = new ArrayList<>();
+            for (Map<String, Object> baseRecord : baseRecords) {
+                rows.add(buildJoinedRow(query, baseRecord, Optional.empty()));
+            }
+            return rows;
         }
 
         AirtableQuery.Join join = query.getJoin().get();
         List<Map<String, Object>> joinRecords = connection.getApiClient().selectJoinTable(query);
         Map<Object, List<Map<String, Object>>> joinIndex = new HashMap<>();
         for (Map<String, Object> record : joinRecords) {
-            Object key = record.get(join.getRightField());
-            joinIndex.computeIfAbsent(key, unused -> new ArrayList<>()).add(record);
+            for (Object key : extractJoinKeys(record.get(join.getRightField()))) {
+                joinIndex.computeIfAbsent(key, unused -> new ArrayList<>()).add(record);
+            }
         }
 
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> baseRecord : baseRecords) {
-            Object baseKey = baseRecord.get(join.getLeftField());
-            List<Map<String, Object>> matches = joinIndex.get(baseKey);
-            if (matches == null || matches.isEmpty()) {
-                rows.add(buildJoinedRow(query, baseRecord, Optional.empty()));
-            } else {
-                for (Map<String, Object> joinRecord : matches) {
-                    rows.add(buildJoinedRow(query, baseRecord, Optional.of(joinRecord)));
+            List<Object> baseKeys = extractJoinKeys(baseRecord.get(join.getLeftField()));
+            boolean matched = false;
+            for (Object baseKey : baseKeys) {
+                List<Map<String, Object>> matches = joinIndex.get(baseKey);
+                if (matches != null && !matches.isEmpty()) {
+                    matched = true;
+                    for (Map<String, Object> joinRecord : matches) {
+                        rows.add(buildJoinedRow(query, baseRecord, Optional.of(joinRecord)));
+                    }
                 }
+            }
+            if (!matched) {
+                rows.add(buildJoinedRow(query, baseRecord, Optional.empty()));
             }
         }
         return rows;
@@ -116,6 +126,42 @@ class AirtableStatement implements Statement {
             row.put(field.getLabel(), value);
         }
         return row;
+    }
+
+    private static List<Object> extractJoinKeys(Object value) {
+        List<Object> keys = new ArrayList<>();
+        if (value == null) {
+            keys.add(null);
+            return keys;
+        }
+        if (value instanceof List) {
+            for (Object element : (List<?>) value) {
+                Object normalized = normalizeJoinKey(element);
+                keys.add(normalized);
+            }
+        } else {
+            keys.add(normalizeJoinKey(value));
+        }
+        return keys;
+    }
+
+    private static Object normalizeJoinKey(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Map) {
+            Map<?, ?> map = (Map<?, ?>) value;
+            Object id = map.get("id");
+            if (id != null) {
+                return String.valueOf(id);
+            }
+            if (!map.isEmpty()) {
+                Object first = map.values().iterator().next();
+                return first != null ? String.valueOf(first) : null;
+            }
+            return null;
+        }
+        return String.valueOf(value);
     }
 
     @Override

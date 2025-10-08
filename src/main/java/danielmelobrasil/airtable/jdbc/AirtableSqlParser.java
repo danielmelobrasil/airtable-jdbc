@@ -27,6 +27,7 @@ final class AirtableSqlParser {
     private static final Pattern ORDER_BY_SPLIT = Pattern.compile("\\s*,\\s*");
     private static final Pattern ORDER_BY_TOKEN = Pattern.compile("^(.+?)\\s+(ASC|DESC)?$", Pattern.CASE_INSENSITIVE);
     private static final Pattern AS_ALIAS = Pattern.compile("(?i)^(.*?)\\s+AS\\s+(.*)$");
+    private static final Pattern TABLE_TOKEN = Pattern.compile("(?i)^(?<table>`[^`]+`|\"[^\"]+\"|'[^']+'|[^\\s]+)(?:\\s+(?:AS\\s+)?(?<alias>[^\\s]+))?$");
     private static final Pattern ON_CLAUSE = Pattern.compile("(?i)\\sON\\s");
 
     private AirtableSqlParser() {
@@ -73,18 +74,18 @@ final class AirtableSqlParser {
         List<AirtableQuery.Sort> sorts = parseOrderBy(orderSegment, tableContext);
 
         return new AirtableQuery(
-                tableContext.baseTable,
+                tableContext.baseTable().name(),
                 columns,
                 filterFormula,
                 limit,
                 sorts,
-                tableContext.join
+                tableContext.join()
         );
     }
 
     private static List<AirtableQuery.SelectedField> parseColumns(String columnSegment, TableContext context) throws AirtableSqlParseException {
         if ("*".equals(columnSegment)) {
-            if (context.join.isPresent()) {
+            if (context.join().isPresent()) {
                 throw new AirtableSqlParseException("SELECT * não é suportado em consultas com LEFT JOIN.");
             }
             return Collections.emptyList();
@@ -126,16 +127,16 @@ final class AirtableSqlParser {
         String fieldName = reference.field;
 
         if (reference.table != null) {
-            if (reference.table.equalsIgnoreCase(context.baseTable)) {
+            if (context.isBaseTable(reference.table)) {
                 origin = AirtableQuery.SelectedField.Origin.BASE;
-            } else if (context.join.isPresent() && context.join.get().matchesAlias(reference.table)) {
+            } else if (context.join().isPresent() && context.join().get().matchesAlias(reference.table)) {
                 origin = AirtableQuery.SelectedField.Origin.JOIN;
             } else {
                 throw new AirtableSqlParseException("Coluna " + expression + " referencia uma tabela desconhecida.");
             }
         }
 
-        if (origin == AirtableQuery.SelectedField.Origin.JOIN && !context.join.isPresent()) {
+        if (origin == AirtableQuery.SelectedField.Origin.JOIN && !context.join().isPresent()) {
             throw new AirtableSqlParseException("Coluna " + expression + " referencia tabela de JOIN inexistente.");
         }
 
@@ -175,9 +176,9 @@ final class AirtableSqlParser {
                 throw new AirtableSqlParseException("Unsupported WHERE predicate: " + trimmed);
             }
             String fieldToken = matcher.group(1).trim();
-            String field = resolveBaseField(fieldToken, context, "WHERE");
+            FieldReference reference = resolveBaseFieldReference(fieldToken, context, "WHERE");
             String valueLiteral = matcher.group(2).trim();
-            formulas.add(buildEqualityFormula(field, valueLiteral));
+            formulas.add(buildEqualityFormula(reference, valueLiteral));
         }
 
         if (formulas.isEmpty()) {
@@ -192,7 +193,18 @@ final class AirtableSqlParser {
         return Optional.of(joined);
     }
 
-    private static String buildEqualityFormula(String field, String valueLiteral) throws AirtableSqlParseException {
+    private static String buildEqualityFormula(FieldReference reference, String valueLiteral) throws AirtableSqlParseException {
+        if (reference.isRecordId()) {
+            String content = isQuoted(valueLiteral) ? unquote(valueLiteral) : valueLiteral;
+            if (content.isEmpty()) {
+                throw new AirtableSqlParseException("RECORD_ID() requires a value.");
+            }
+            return String.format("RECORD_ID() = '%s'", escapeFormulaValue(content));
+        }
+        return buildFieldEqualityFormula(reference.field, valueLiteral);
+    }
+
+    private static String buildFieldEqualityFormula(String field, String valueLiteral) throws AirtableSqlParseException {
         if (isQuoted(valueLiteral)) {
             String content = unquote(valueLiteral);
             return String.format("{%s} = '%s'", field, escapeFormulaValue(content));
@@ -271,24 +283,25 @@ final class AirtableSqlParser {
     private static TableContext parseTableSegment(String segment) throws AirtableSqlParseException {
         int joinIndex = indexOfJoinKeyword(segment);
         if (joinIndex < 0) {
-            String baseTable = segment.trim();
-            if (baseTable.isEmpty()) {
+            TableSpec baseSpec = parseTableSpec(segment.trim());
+            if (baseSpec.name().isEmpty()) {
                 throw new AirtableSqlParseException("Table name is required in FROM clause.");
             }
-            return new TableContext(baseTable, Optional.empty());
+            return new TableContext(baseSpec, Optional.empty());
         }
 
-        String baseTable = segment.substring(0, joinIndex).trim();
-        if (baseTable.isEmpty()) {
+        String baseToken = segment.substring(0, joinIndex).trim();
+        TableSpec baseSpec = parseTableSpec(baseToken);
+        if (baseSpec.name().isEmpty()) {
             throw new AirtableSqlParseException("Table name is required before LEFT JOIN.");
         }
 
         String joinSegment = segment.substring(joinIndex).trim();
-        AirtableQuery.Join join = parseJoin(baseTable, joinSegment);
-        return new TableContext(baseTable, Optional.of(join));
+        AirtableQuery.Join join = parseJoin(baseSpec, joinSegment);
+        return new TableContext(baseSpec, Optional.of(join));
     }
 
-    private static AirtableQuery.Join parseJoin(String baseTable, String joinSegment) throws AirtableSqlParseException {
+    private static AirtableQuery.Join parseJoin(TableSpec baseTable, String joinSegment) throws AirtableSqlParseException {
         String normalized = joinSegment.trim();
         String lower = normalized.toLowerCase(Locale.ENGLISH);
         boolean isJoint = lower.startsWith("left joint ");
@@ -315,25 +328,19 @@ final class AirtableSqlParser {
             throw new AirtableSqlParseException("Only equality conditions are supported in LEFT JOIN.");
         }
 
-        FieldReference left = parseFieldReference(equality[0].trim());
-        FieldReference right = parseFieldReference(equality[1].trim());
+        FieldReference left = parseFieldReference(stripEnclosingParentheses(equality[0].trim()));
+        FieldReference right = parseFieldReference(stripEnclosingParentheses(equality[1].trim()));
 
-        if (left.table == null || !left.table.equalsIgnoreCase(baseTable)) {
+        if (left.table == null || !baseTable.matches(left.table)) {
             throw new AirtableSqlParseException(
                     "LEFT JOIN só suporta condições onde o lado esquerdo referencia a tabela base (recebido: "
                             + (left.table == null ? "<null>" : left.table) + ")."
             );
         }
 
-        String joinTableName;
-        Optional<String> alias = Optional.empty();
-        String[] tableParts = tableToken.split("\\s+");
-        if (tableParts.length > 1) {
-            joinTableName = tableParts[0];
-            alias = Optional.of(tableParts[1]);
-        } else {
-            joinTableName = tableToken;
-        }
+        TableSpec joinSpec = parseTableSpec(tableToken);
+        String joinTableName = joinSpec.name();
+        Optional<String> alias = joinSpec.alias();
 
         if (right.table == null) {
             throw new AirtableSqlParseException("O lado direito do LEFT JOIN deve estar qualificado com a tabela de JOIN.");
@@ -355,17 +362,23 @@ final class AirtableSqlParser {
     }
 
     private static FieldReference parseFieldReference(String expression) throws AirtableSqlParseException {
-        String trimmed = expression.trim();
+        String trimmed = stripEnclosingParentheses(expression.trim());
+        while (trimmed.startsWith("(")) {
+            trimmed = trimmed.substring(1).trim();
+        }
+        while (trimmed.endsWith(")")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1).trim();
+        }
         if (trimmed.isEmpty()) {
             throw new AirtableSqlParseException("Campo não pode ser vazio.");
         }
         int dotIndex = trimmed.indexOf('.');
         if (dotIndex < 0) {
-            return new FieldReference(null, trimmed);
+            return new FieldReference(null, normalizeIdentifier(trimmed));
         }
 
-        String table = trimmed.substring(0, dotIndex).trim();
-        String field = trimmed.substring(dotIndex + 1).trim();
+        String table = normalizeIdentifier(trimmed.substring(0, dotIndex).trim());
+        String field = normalizeIdentifier(trimmed.substring(dotIndex + 1).trim());
         if (table.isEmpty() || field.isEmpty()) {
             throw new AirtableSqlParseException("Campo " + expression + " é inválido.");
         }
@@ -373,11 +386,45 @@ final class AirtableSqlParser {
     }
 
     private static String resolveBaseField(String token, TableContext context, String clause) throws AirtableSqlParseException {
+        return resolveBaseFieldReference(token, context, clause).field;
+    }
+
+    private static FieldReference resolveBaseFieldReference(String token, TableContext context, String clause) throws AirtableSqlParseException {
         FieldReference reference = parseFieldReference(token);
-        if (reference.table != null && !reference.table.equalsIgnoreCase(context.baseTable)) {
+        if (reference.table != null && !context.isBaseTable(reference.table)) {
             throw new AirtableSqlParseException(clause + " só suporta campos da tabela base.");
         }
-        return reference.field;
+        return reference;
+    }
+
+    private static String stripEnclosingParentheses(String value) {
+        String trimmed = value;
+        while (trimmed.length() >= 2 && trimmed.startsWith("(") && trimmed.endsWith(")")) {
+            int depth = 0;
+            boolean balanced = true;
+            for (int i = 0; i < trimmed.length(); i++) {
+                char ch = trimmed.charAt(i);
+                if (ch == '(') {
+                    depth++;
+                } else if (ch == ')') {
+                    depth--;
+                    if (depth < 0) {
+                        balanced = false;
+                        break;
+                    }
+                    if (depth == 0 && i < trimmed.length() - 1) {
+                        balanced = false;
+                        break;
+                    }
+                }
+            }
+            if (balanced && depth == 0) {
+                trimmed = trimmed.substring(1, trimmed.length() - 1).trim();
+            } else {
+                break;
+            }
+        }
+        return trimmed;
     }
 
     private static int indexOfKeyword(String source, String keyword) {
@@ -432,12 +479,52 @@ final class AirtableSqlParser {
     }
 
     private static final class TableContext {
-        private final String baseTable;
+        private final TableSpec baseTable;
         private final Optional<AirtableQuery.Join> join;
 
-        private TableContext(String baseTable, Optional<AirtableQuery.Join> join) {
+        private TableContext(TableSpec baseTable, Optional<AirtableQuery.Join> join) {
             this.baseTable = baseTable;
             this.join = join;
+        }
+
+        TableSpec baseTable() {
+            return baseTable;
+        }
+
+        Optional<AirtableQuery.Join> join() {
+            return join;
+        }
+
+        boolean isBaseTable(String candidate) {
+            return baseTable.matches(candidate);
+        }
+    }
+
+    private static final class TableSpec {
+        private final String name;
+        private final Optional<String> alias;
+
+        private TableSpec(String name, Optional<String> alias) {
+            this.name = name;
+            this.alias = alias;
+        }
+
+        String name() {
+            return name;
+        }
+
+        Optional<String> alias() {
+            return alias;
+        }
+
+        boolean matches(String candidate) {
+            if (candidate == null) {
+                return false;
+            }
+            if (name.equalsIgnoreCase(candidate)) {
+                return true;
+            }
+            return alias.filter(a -> a.equalsIgnoreCase(candidate)).isPresent();
         }
     }
 
@@ -449,5 +536,43 @@ final class AirtableSqlParser {
             this.table = table;
             this.field = field;
         }
+
+        boolean isRecordId() {
+            return "id".equalsIgnoreCase(field);
+        }
+    }
+
+    private static TableSpec parseTableSpec(String token) throws AirtableSqlParseException {
+        String trimmed = token.trim();
+        if (trimmed.isEmpty()) {
+            return new TableSpec("", Optional.empty());
+        }
+
+        Matcher matcher = TABLE_TOKEN.matcher(trimmed);
+        if (!matcher.matches()) {
+            throw new AirtableSqlParseException("Sintaxe de tabela inválida: " + token);
+        }
+
+        String tableName = normalizeIdentifier(matcher.group("table"));
+        String aliasGroup = matcher.group("alias");
+        Optional<String> alias = aliasGroup != null
+                ? Optional.of(normalizeIdentifier(aliasGroup))
+                : Optional.empty();
+
+        if (alias.isPresent() && alias.get().isEmpty()) {
+            throw new AirtableSqlParseException("Alias não pode ser vazio: " + token);
+        }
+
+        return new TableSpec(tableName, alias);
+    }
+
+    private static String normalizeIdentifier(String token) {
+        String value = token.trim();
+        if ((value.startsWith("`") && value.endsWith("`")) ||
+                (value.startsWith("\"") && value.endsWith("\"")) ||
+                (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.substring(1, value.length() - 1);
+        }
+        return value;
     }
 }
