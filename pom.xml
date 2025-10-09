@@ -62,4 +62,12 @@
       </plugins>
     </pluginManagement>
   </build>
+  <distributionManagement>
+    <repository>
+      <id>github</id>
+      <name>GitHub danielmelobrasil Apache Maven Packages</name>
+      <url>https://maven.pkg.github.com/danielmelobrasil/airtable-jdbc</url>
+    </repository>
+  </distributionManagement>  
+
 </project>
