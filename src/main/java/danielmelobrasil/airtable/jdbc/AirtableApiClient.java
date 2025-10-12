@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.logging.Level;
@@ -31,25 +32,30 @@ class AirtableApiClient {
     private static final Logger LOGGER = Logger.getLogger(AirtableApiClient.class.getName());
 
     private final AirtableConfig config;
+    private final Object fieldTypesCacheLock = new Object();
+    private final Map<String, Map<String, String>> fieldTypesCache = new HashMap<>();
 
     AirtableApiClient(AirtableConfig config) {
         this.config = config;
     }
 
     List<Map<String, Object>> select(AirtableQuery query) throws SQLException {
+        Map<String, String> fieldTypes = getFieldTypes(query.getTableName());
         return executeSelect(
                 query.getTableName(),
                 query.getRequiredFieldsForBaseTable(),
                 query.getFilterFormula(),
                 query.getMaxRecords(),
                 query.getSorts(),
-                config.getDefaultView()
+                config.getDefaultView(),
+                fieldTypes
         );
     }
 
     List<Map<String, Object>> selectJoinTable(AirtableQuery query) throws SQLException {
         AirtableQuery.Join join = query.getJoin()
                 .orElseThrow(() -> new SQLException("Join não definido para a consulta."));
+        Map<String, String> fieldTypes = getFieldTypes(join.getTableName());
         List<String> fields = query.getRequiredFieldsForJoinTable();
         if (fields.isEmpty()) {
             return Collections.emptyList();
@@ -60,7 +66,8 @@ class AirtableApiClient {
                 Optional.empty(),
                 Optional.empty(),
                 Collections.emptyList(),
-                Optional.empty()
+                Optional.empty(),
+                fieldTypes
         );
     }
 
@@ -108,7 +115,8 @@ class AirtableApiClient {
             Optional<String> filterFormula,
             Optional<Integer> maxRecords,
             List<AirtableQuery.Sort> sorts,
-            Optional<String> view
+            Optional<String> view,
+            Map<String, String> fieldTypes
     ) throws SQLException {
         List<Map<String, Object>> allRecords = new ArrayList<>();
         String offset = null;
@@ -124,7 +132,9 @@ class AirtableApiClient {
 
                 if (status >= 200 && status < 300) {
                     RecordsResponse response = parseRecordsResponse(body);
-                    allRecords.addAll(response.records);
+                    for (Map<String, Object> row : response.records) {
+                        allRecords.add(applyFieldTypeConversions(row, fieldTypes));
+                    }
                     offset = response.offset;
                 } else {
                     LOGGER.log(Level.WARNING, "Airtable API request failed. Status: {0}, Body: {1}, URL: {2}", new Object[]{status, body, url});
@@ -274,6 +284,85 @@ class AirtableApiClient {
         Object offsetObj = map.get("offset");
         response.offset = offsetObj != null ? String.valueOf(offsetObj) : null;
         return response;
+    }
+
+    private Map<String, String> getFieldTypes(String tableName) throws SQLException {
+        if (tableName == null || tableName.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        String normalizedTableName = tableName.toLowerCase(Locale.ENGLISH);
+        synchronized (fieldTypesCacheLock) {
+            Map<String, String> cached = fieldTypesCache.get(normalizedTableName);
+            if (cached != null) {
+                return cached;
+            }
+            List<MetaTable> tables = fetchTablesMetadata();
+            for (MetaTable table : tables) {
+                if (table.name == null) {
+                    continue;
+                }
+                String key = table.name.toLowerCase(Locale.ENGLISH);
+                if (!fieldTypesCache.containsKey(key)) {
+                    Map<String, String> types = new HashMap<>();
+                    if (table.fields != null) {
+                        for (MetaField field : table.fields) {
+                            if (field.name != null && field.type != null) {
+                                types.put(field.name.toLowerCase(Locale.ENGLISH), field.type.toLowerCase(Locale.ENGLISH));
+                            }
+                        }
+                    }
+                    fieldTypesCache.put(key, Collections.unmodifiableMap(types));
+                }
+            }
+            Map<String, String> result = fieldTypesCache.get(normalizedTableName);
+            if (result == null) {
+                result = Collections.emptyMap();
+                fieldTypesCache.put(normalizedTableName, result);
+            }
+            return result;
+        }
+    }
+
+    private Map<String, Object> applyFieldTypeConversions(Map<String, Object> row, Map<String, String> fieldTypes) {
+        if (row == null || row.isEmpty() || fieldTypes.isEmpty()) {
+            return row;
+        }
+        Map<String, Object> converted = null;
+        for (Map.Entry<String, Object> entry : row.entrySet()) {
+            String fieldName = entry.getKey();
+            String type = fieldTypes.get(fieldName.toLowerCase(Locale.ENGLISH));
+            if (type == null) {
+                continue;
+            }
+            Object newValue = convertFieldValue(type, entry.getValue());
+            if (!Objects.equals(newValue, entry.getValue())) {
+                if (converted == null) {
+                    converted = new LinkedHashMap<>(row);
+                }
+                converted.put(fieldName, newValue);
+            }
+        }
+        return converted != null ? converted : row;
+    }
+
+    private Object convertFieldValue(String airtableType, Object value) {
+        if (value == null) {
+            return null;
+        }
+        switch (airtableType) {
+            case "date":
+            case "datewithtimezone":
+                if (value instanceof String) {
+                    try {
+                        return java.sql.Date.valueOf((String) value);
+                    } catch (IllegalArgumentException ex) {
+                        LOGGER.log(Level.FINE, "Unable to convert Airtable date value \"{0}\": {1}", new Object[]{value, ex.getMessage()});
+                    }
+                }
+                return value;
+            default:
+                return value;
+        }
     }
 
     private MetaTablesResponse parseMetaTables(String body) throws IOException {

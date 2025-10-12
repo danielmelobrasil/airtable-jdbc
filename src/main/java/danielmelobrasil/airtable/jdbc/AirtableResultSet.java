@@ -765,13 +765,10 @@ class AirtableResultSet implements ResultSet {
     @Override
     public java.sql.Date getDate(int columnIndex) throws SQLException {
         Object value = getValue(columnIndex);
-        if (value instanceof java.sql.Date) {
-            return (java.sql.Date) value;
+        if (value == null) {
+            return null;
         }
-        if (value instanceof java.util.Date) {
-            return new java.sql.Date(((java.util.Date) value).getTime());
-        }
-        throw new SQLException("Cannot convert value to java.sql.Date: " + value);
+        return convertToSqlDate(value);
     }
 
     @Override
@@ -1210,6 +1207,13 @@ class AirtableResultSet implements ResultSet {
         if (type == String.class) {
             return type.cast(String.valueOf(value));
         }
+        if (type == java.sql.Date.class) {
+            return type.cast(convertToSqlDate(value));
+        }
+        if (type == java.util.Date.class) {
+            java.sql.Date date = convertToSqlDate(value);
+            return date != null ? type.cast(new java.util.Date(date.getTime())) : null;
+        }
         if (Number.class.isAssignableFrom(type) && value instanceof Number) {
             Number number = (Number) value;
             if (type == Integer.class) {
@@ -1243,5 +1247,28 @@ class AirtableResultSet implements ResultSet {
             }
         }
         throw new SQLException("Cannot convert value of type " + value.getClass() + " to " + type.getName());
+    }
+
+    private java.sql.Date convertToSqlDate(Object value) throws SQLException {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof java.sql.Date) {
+            return (java.sql.Date) value;
+        }
+        if (value instanceof java.time.LocalDate) {
+            return java.sql.Date.valueOf((java.time.LocalDate) value);
+        }
+        if (value instanceof java.util.Date) {
+            return new java.sql.Date(((java.util.Date) value).getTime());
+        }
+        if (value instanceof String) {
+            try {
+                return java.sql.Date.valueOf((String) value);
+            } catch (IllegalArgumentException ex) {
+                throw new SQLException("Cannot convert value to java.sql.Date: " + value, ex);
+            }
+        }
+        throw new SQLException("Cannot convert value to java.sql.Date: " + value);
     }
 }
