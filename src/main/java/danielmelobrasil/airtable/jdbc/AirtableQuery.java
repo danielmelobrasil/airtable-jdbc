@@ -17,15 +17,17 @@ final class AirtableQuery {
     private final Optional<Integer> maxRecords;
     private final List<Sort> sorts;
     private final Optional<Join> join;
+    private final List<PostFilter> postFilters;
 
     AirtableQuery(
             String tableName,
             List<SelectedField> selectedFields,
             Optional<String> filterFormula,
             Optional<Integer> maxRecords,
-            List<Sort> sorts
+            List<Sort> sorts,
+            List<PostFilter> postFilters
     ) {
-        this(tableName, selectedFields, filterFormula, maxRecords, sorts, Optional.empty());
+        this(tableName, selectedFields, filterFormula, maxRecords, sorts, Optional.empty(), postFilters);
     }
 
     AirtableQuery(
@@ -34,7 +36,8 @@ final class AirtableQuery {
             Optional<String> filterFormula,
             Optional<Integer> maxRecords,
             List<Sort> sorts,
-            Optional<Join> join
+            Optional<Join> join,
+            List<PostFilter> postFilters
     ) {
         this.tableName = Objects.requireNonNull(tableName, "tableName");
         this.selectedFields = Collections.unmodifiableList(new ArrayList<>(selectedFields));
@@ -42,6 +45,7 @@ final class AirtableQuery {
         this.maxRecords = Objects.requireNonNull(maxRecords, "maxRecords");
         this.sorts = Collections.unmodifiableList(new ArrayList<>(sorts));
         this.join = Objects.requireNonNull(join, "join");
+        this.postFilters = Collections.unmodifiableList(new ArrayList<>(postFilters));
     }
 
     String getTableName() {
@@ -74,6 +78,10 @@ final class AirtableQuery {
 
     Optional<Join> getJoin() {
         return join;
+    }
+
+    List<PostFilter> getPostFilters() {
+        return postFilters;
     }
 
     List<String> getRequiredFieldsForBaseTable() {
@@ -211,6 +219,35 @@ final class AirtableQuery {
                 return true;
             }
             return alias.filter(a -> a.equalsIgnoreCase(candidate)).isPresent();
+        }
+    }
+
+    static final class PostFilter {
+        enum Operator {
+            IS_NULL,
+            IS_NOT_NULL
+        }
+
+        private final SelectedField.Origin origin;
+        private final String field;
+        private final Operator operator;
+
+        PostFilter(SelectedField.Origin origin, String field, Operator operator) {
+            this.origin = Objects.requireNonNull(origin, "origin");
+            this.field = Objects.requireNonNull(field, "field");
+            this.operator = Objects.requireNonNull(operator, "operator");
+        }
+
+        SelectedField.Origin getOrigin() {
+            return origin;
+        }
+
+        String getField() {
+            return field;
+        }
+
+        Operator getOperator() {
+            return operator;
         }
     }
 }

@@ -53,7 +53,8 @@ class AirtableStatement implements Statement {
                 query.getFilterFormula(),
                 Optional.of(maxRows),
                 query.getSorts(),
-                query.getJoin()
+                query.getJoin(),
+                query.getPostFilters()
         );
     }
 
@@ -73,10 +74,13 @@ class AirtableStatement implements Statement {
     }
 
     private List<Map<String, Object>> mergeJoinIfNeeded(AirtableQuery query, List<Map<String, Object>> baseRecords) throws SQLException {
+        List<AirtableQuery.PostFilter> postFilters = query.getPostFilters();
         if (!query.getJoin().isPresent()) {
             List<Map<String, Object>> rows = new ArrayList<>();
             for (Map<String, Object> baseRecord : baseRecords) {
-                rows.add(buildJoinedRow(query, baseRecord, Optional.empty()));
+                if (passesPostFilters(postFilters, baseRecord, Optional.empty())) {
+                    rows.add(buildJoinedRow(query, baseRecord, Optional.empty()));
+                }
             }
             return rows;
         }
@@ -99,11 +103,13 @@ class AirtableStatement implements Statement {
                 if (matches != null && !matches.isEmpty()) {
                     matched = true;
                     for (Map<String, Object> joinRecord : matches) {
-                        rows.add(buildJoinedRow(query, baseRecord, Optional.of(joinRecord)));
+                        if (passesPostFilters(postFilters, baseRecord, Optional.of(joinRecord))) {
+                            rows.add(buildJoinedRow(query, baseRecord, Optional.of(joinRecord)));
+                        }
                     }
                 }
             }
-            if (!matched) {
+            if (!matched && passesPostFilters(postFilters, baseRecord, Optional.empty())) {
                 rows.add(buildJoinedRow(query, baseRecord, Optional.empty()));
             }
         }
@@ -162,6 +168,37 @@ class AirtableStatement implements Statement {
             return null;
         }
         return String.valueOf(value);
+    }
+
+    private boolean passesPostFilters(List<AirtableQuery.PostFilter> filters,
+                                      Map<String, Object> baseRecord,
+                                      Optional<Map<String, Object>> joinRecord) {
+        if (filters.isEmpty()) {
+            return true;
+        }
+        for (AirtableQuery.PostFilter filter : filters) {
+            Object value;
+            if (filter.getOrigin() == AirtableQuery.SelectedField.Origin.BASE) {
+                value = baseRecord.get(filter.getField());
+            } else {
+                value = joinRecord.map(record -> record.get(filter.getField())).orElse(null);
+            }
+            switch (filter.getOperator()) {
+                case IS_NULL:
+                    if (value != null) {
+                        return false;
+                    }
+                    break;
+                case IS_NOT_NULL:
+                    if (value == null) {
+                        return false;
+                    }
+                    break;
+                default:
+                    throw new IllegalStateException("Unsupported filter operator: " + filter.getOperator());
+            }
+        }
+        return true;
     }
 
     @Override

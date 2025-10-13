@@ -23,7 +23,8 @@ import java.util.regex.Pattern;
 final class AirtableSqlParser {
 
     private static final Pattern AND_SPLIT = Pattern.compile("(?i)\\s+AND\\s+");
-    private static final Pattern COMPARISON = Pattern.compile("^([\\w\\s\\.]+?)\\s*=\\s*(.+)$");
+    private static final Pattern COMPARISON = Pattern.compile("^(.*?)\\s*=\\s*(.+)$");
+    private static final Pattern NULL_CHECK = Pattern.compile("^(.*?)\\s+IS\\s+(NOT\\s+)?NULL$", Pattern.CASE_INSENSITIVE);
     private static final Pattern ORDER_BY_SPLIT = Pattern.compile("\\s*,\\s*");
     private static final Pattern ORDER_BY_TOKEN = Pattern.compile("^(.+?)\\s+(ASC|DESC)?$", Pattern.CASE_INSENSITIVE);
     private static final Pattern AS_ALIAS = Pattern.compile("(?i)^(.*?)\\s+AS\\s+(.*)$");
@@ -71,7 +72,8 @@ final class AirtableSqlParser {
         Optional<Integer> limit = extractLimit(trimmed, limitIndex);
 
         List<AirtableQuery.SelectedField> columns = parseColumns(columnSegment, tableContext);
-        Optional<String> filterFormula = parseWhere(whereSegment, tableContext);
+        WhereResult whereResult = parseWhere(whereSegment, tableContext);
+        Optional<String> filterFormula = whereResult.filterFormula();
         List<AirtableQuery.Sort> sorts = parseOrderBy(orderSegment, tableContext);
 
         return new AirtableQuery(
@@ -80,7 +82,8 @@ final class AirtableSqlParser {
                 filterFormula,
                 limit,
                 sorts,
-                tableContext.join()
+                tableContext.join(),
+                whereResult.postFilters()
         );
     }
 
@@ -155,41 +158,74 @@ final class AirtableSqlParser {
         return new AirtableQuery.SelectedField(origin, fieldName, label);
     }
 
-    private static Optional<String> parseWhere(String whereSegment, TableContext context) throws AirtableSqlParseException {
+    private static WhereResult parseWhere(String whereSegment, TableContext context) throws AirtableSqlParseException {
         if (whereSegment == null || whereSegment.isEmpty()) {
-            return Optional.empty();
+            return WhereResult.empty();
         }
         String[] expressions = AND_SPLIT.split(whereSegment);
         if (expressions.length == 0) {
-            return Optional.empty();
+            return WhereResult.empty();
         }
 
         List<String> formulas = new ArrayList<>();
+        List<AirtableQuery.PostFilter> postFilters = new ArrayList<>();
         for (String expression : expressions) {
             String trimmed = expression.trim();
             if (trimmed.isEmpty()) {
                 continue;
             }
-            Matcher matcher = COMPARISON.matcher(trimmed);
-            if (!matcher.matches()) {
-                throw new AirtableSqlParseException("Unsupported WHERE predicate: " + trimmed);
+
+            Matcher equality = COMPARISON.matcher(trimmed);
+            if (equality.matches()) {
+                String fieldToken = equality.group(1).trim();
+                FieldReference reference = parseFieldReference(fieldToken);
+                boolean isBase = reference.table == null || context.isBaseTable(reference.table);
+                boolean isJoin = !isBase && context.join().isPresent() && context.join().get().matchesAlias(reference.table);
+
+                if (!isBase && !isJoin) {
+                    throw new AirtableSqlParseException("WHERE referência tabela desconhecida: " + trimmed);
+                }
+
+                if (!isBase) {
+                    throw new AirtableSqlParseException("WHERE ainda não suporta comparações em tabelas de JOIN: " + trimmed);
+                }
+
+                FieldReference baseReference = resolveBaseFieldReference(fieldToken, context, "WHERE");
+                String valueLiteral = equality.group(2).trim();
+                formulas.add(buildEqualityFormula(baseReference, valueLiteral));
+                continue;
             }
-            String fieldToken = matcher.group(1).trim();
-            FieldReference reference = resolveBaseFieldReference(fieldToken, context, "WHERE");
-            String valueLiteral = matcher.group(2).trim();
-            formulas.add(buildEqualityFormula(reference, valueLiteral));
+
+            Matcher nullCheck = NULL_CHECK.matcher(trimmed);
+            if (nullCheck.matches()) {
+                String fieldToken = nullCheck.group(1).trim();
+                boolean negated = nullCheck.group(2) != null;
+                FieldReference reference = parseFieldReference(fieldToken);
+                boolean isBase = reference.table == null || context.isBaseTable(reference.table);
+                boolean isJoin = !isBase && context.join().isPresent() && context.join().get().matchesAlias(reference.table);
+                if (!isBase && !isJoin) {
+                    throw new AirtableSqlParseException("WHERE referência tabela desconhecida: " + trimmed);
+                }
+                if (isBase) {
+                    FieldReference baseReference = resolveBaseFieldReference(fieldToken, context, "WHERE");
+                    formulas.add(buildNullCheckFormula(baseReference, negated));
+                } else {
+                    AirtableQuery.PostFilter.Operator operator = negated
+                            ? AirtableQuery.PostFilter.Operator.IS_NOT_NULL
+                            : AirtableQuery.PostFilter.Operator.IS_NULL;
+                    postFilters.add(new AirtableQuery.PostFilter(
+                            AirtableQuery.SelectedField.Origin.JOIN,
+                            reference.field,
+                            operator
+                    ));
+                }
+                continue;
+            }
+
+            throw new AirtableSqlParseException("Unsupported WHERE predicate: " + trimmed);
         }
 
-        if (formulas.isEmpty()) {
-            return Optional.empty();
-        }
-
-        if (formulas.size() == 1) {
-            return Optional.of(formulas.get(0));
-        }
-
-        String joined = "AND(" + String.join(",", formulas) + ")";
-        return Optional.of(joined);
+        return WhereResult.of(formulas, postFilters);
     }
 
     private static String buildEqualityFormula(FieldReference reference, String valueLiteral) throws AirtableSqlParseException {
@@ -214,6 +250,19 @@ final class AirtableSqlParser {
         }
 
         throw new AirtableSqlParseException("WHERE values must be quoted strings or numeric literals: " + valueLiteral);
+    }
+
+    private static String buildNullCheckFormula(FieldReference reference, boolean negated) {
+        String expression;
+        if (reference.isRecordId()) {
+            expression = "RECORD_ID() = BLANK()";
+        } else {
+            expression = String.format("{%s} = BLANK()", reference.field);
+        }
+        if (negated) {
+            return "NOT(" + expression + ")";
+        }
+        return expression;
     }
 
     private static List<AirtableQuery.Sort> parseOrderBy(String orderSegment, TableContext context) throws AirtableSqlParseException {
@@ -616,5 +665,42 @@ final class AirtableSqlParser {
     private static final class SplitExpression {
         private String expression;
         private String alias;
+    }
+
+    private static final class WhereResult {
+        private final Optional<String> filterFormula;
+        private final List<AirtableQuery.PostFilter> postFilters;
+
+        private WhereResult(Optional<String> filterFormula, List<AirtableQuery.PostFilter> postFilters) {
+            this.filterFormula = filterFormula;
+            this.postFilters = postFilters;
+        }
+
+        static WhereResult empty() {
+            return new WhereResult(Optional.empty(), Collections.emptyList());
+        }
+
+        static WhereResult of(List<String> formulas, List<AirtableQuery.PostFilter> postFilters) {
+            Optional<String> formula;
+            if (formulas.isEmpty()) {
+                formula = Optional.empty();
+            } else if (formulas.size() == 1) {
+                formula = Optional.of(formulas.get(0));
+            } else {
+                formula = Optional.of("AND(" + String.join(",", formulas) + ")");
+            }
+            List<AirtableQuery.PostFilter> immutableFilters = postFilters.isEmpty()
+                    ? Collections.emptyList()
+                    : Collections.unmodifiableList(new ArrayList<>(postFilters));
+            return new WhereResult(formula, immutableFilters);
+        }
+
+        Optional<String> filterFormula() {
+            return filterFormula;
+        }
+
+        List<AirtableQuery.PostFilter> postFilters() {
+            return postFilters;
+        }
     }
 }
