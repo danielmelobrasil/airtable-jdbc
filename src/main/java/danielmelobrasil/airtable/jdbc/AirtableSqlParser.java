@@ -16,14 +16,15 @@ import java.util.regex.Pattern;
  *  - SELECT column list (optional aliases) without aggregations
  *  - FROM tableName
  *  - Optional LEFT JOIN table2 ON base.field = join.field
- *  - Optional WHERE clause with equality comparisons combined using AND (base table only)
+ *  - Optional WHERE clause with equality/inequality comparisons combined using AND
+ *    (base table pushed down; JOIN predicates evaluated client-side)
  *  - Optional ORDER BY with ASC/DESC (base table only)
  *  - Optional LIMIT
  */
 final class AirtableSqlParser {
 
     private static final Pattern AND_SPLIT = Pattern.compile("(?i)\\s+AND\\s+");
-    private static final Pattern COMPARISON = Pattern.compile("^(.*?)\\s*=\\s*(.+)$");
+    private static final Pattern COMPARISON = Pattern.compile("^(.*?)\\s*(=|<>|!=)\\s*(.+)$");
     private static final Pattern NULL_CHECK = Pattern.compile("^(.*?)\\s+IS\\s+(NOT\\s+)?NULL$", Pattern.CASE_INSENSITIVE);
     private static final Pattern ORDER_BY_SPLIT = Pattern.compile("\\s*,\\s*");
     private static final Pattern ORDER_BY_TOKEN = Pattern.compile("^(.+?)\\s+(ASC|DESC)?$", Pattern.CASE_INSENSITIVE);
@@ -175,9 +176,14 @@ final class AirtableSqlParser {
                 continue;
             }
 
-            Matcher equality = COMPARISON.matcher(trimmed);
-            if (equality.matches()) {
-                String fieldToken = equality.group(1).trim();
+            Matcher comparison = COMPARISON.matcher(trimmed);
+            if (comparison.matches()) {
+                String fieldToken = comparison.group(1).trim();
+                String operatorToken = comparison.group(2).trim();
+                String valueLiteral = comparison.group(3).trim();
+                ComparisonOperator operator = ComparisonOperator.fromToken(operatorToken)
+                        .orElseThrow(() -> new AirtableSqlParseException("WHERE operador não suportado: " + operatorToken));
+
                 FieldReference reference = parseFieldReference(fieldToken);
                 boolean isBase = reference.table == null || context.isBaseTable(reference.table);
                 boolean isJoin = !isBase && context.join().isPresent() && context.join().get().matchesAlias(reference.table);
@@ -186,13 +192,30 @@ final class AirtableSqlParser {
                     throw new AirtableSqlParseException("WHERE referência tabela desconhecida: " + trimmed);
                 }
 
-                if (!isBase) {
-                    throw new AirtableSqlParseException("WHERE ainda não suporta comparações em tabelas de JOIN: " + trimmed);
+                if (isBase) {
+                    FieldReference baseReference = resolveBaseFieldReference(fieldToken, context, "WHERE");
+                    formulas.add(buildComparisonFormula(baseReference, operator, valueLiteral));
+                } else {
+                    AirtableQuery.PostFilter.Operator postOperator;
+                    switch (operator) {
+                        case EQUALS:
+                            postOperator = AirtableQuery.PostFilter.Operator.EQUALS;
+                            break;
+                        case NOT_EQUALS:
+                            postOperator = AirtableQuery.PostFilter.Operator.NOT_EQUALS;
+                            break;
+                        default:
+                            throw new AirtableSqlParseException("Operador de JOIN não suportado: " + operatorToken);
+                    }
+                    Object parsedValue = parseFilterValue(valueLiteral);
+                    postFilters.add(new AirtableQuery.PostFilter(
+                            AirtableQuery.SelectedField.Origin.JOIN,
+                            reference.field,
+                            postOperator,
+                            parsedValue
+                    ));
                 }
 
-                FieldReference baseReference = resolveBaseFieldReference(fieldToken, context, "WHERE");
-                String valueLiteral = equality.group(2).trim();
-                formulas.add(buildEqualityFormula(baseReference, valueLiteral));
                 continue;
             }
 
@@ -216,7 +239,8 @@ final class AirtableSqlParser {
                     postFilters.add(new AirtableQuery.PostFilter(
                             AirtableQuery.SelectedField.Origin.JOIN,
                             reference.field,
-                            operator
+                            operator,
+                            null
                     ));
                 }
                 continue;
@@ -228,27 +252,47 @@ final class AirtableSqlParser {
         return WhereResult.of(formulas, postFilters);
     }
 
-    private static String buildEqualityFormula(FieldReference reference, String valueLiteral) throws AirtableSqlParseException {
+    private static String buildComparisonFormula(FieldReference reference,
+                                                 ComparisonOperator operator,
+                                                 String valueLiteral) throws AirtableSqlParseException {
         if (reference.isRecordId()) {
             String content = isQuoted(valueLiteral) ? unquote(valueLiteral) : valueLiteral;
             if (content.isEmpty()) {
                 throw new AirtableSqlParseException("RECORD_ID() requires a value.");
             }
-            return String.format("RECORD_ID() = '%s'", escapeFormulaValue(content));
+            if (operator == ComparisonOperator.EQUALS) {
+                return String.format("RECORD_ID() = '%s'", escapeFormulaValue(content));
+            }
+            if (operator == ComparisonOperator.NOT_EQUALS) {
+                return String.format("RECORD_ID() != '%s'", escapeFormulaValue(content));
+            }
+            throw new AirtableSqlParseException("Operador não suportado para RECORD_ID(): " + operator);
         }
-        return buildFieldEqualityFormula(reference.field, valueLiteral);
+        return buildFieldComparisonFormula(reference.field, operator, valueLiteral);
     }
 
-    private static String buildFieldEqualityFormula(String field, String valueLiteral) throws AirtableSqlParseException {
+    private static String buildFieldComparisonFormula(String field,
+                                                      ComparisonOperator operator,
+                                                      String valueLiteral) throws AirtableSqlParseException {
         if (isQuoted(valueLiteral)) {
             String content = unquote(valueLiteral);
-            return String.format("{%s} = '%s'", field, escapeFormulaValue(content));
+            return String.format("{%s} %s '%s'", field, operator.getFormulaOperator(), escapeFormulaValue(content));
         }
 
         if (isNumeric(valueLiteral)) {
-            return String.format(Locale.ENGLISH, "{%s} = %s", field, valueLiteral);
+            return String.format(Locale.ENGLISH, "{%s} %s %s", field, operator.getFormulaOperator(), valueLiteral);
         }
 
+        throw new AirtableSqlParseException("WHERE values must be quoted strings or numeric literals: " + valueLiteral);
+    }
+
+    private static Object parseFilterValue(String valueLiteral) throws AirtableSqlParseException {
+        if (isQuoted(valueLiteral)) {
+            return unquote(valueLiteral);
+        }
+        if (isNumeric(valueLiteral)) {
+            return Double.parseDouble(valueLiteral);
+        }
         throw new AirtableSqlParseException("WHERE values must be quoted strings or numeric literals: " + valueLiteral);
     }
 
@@ -523,6 +567,35 @@ final class AirtableSqlParser {
             return true;
         } catch (NumberFormatException ex) {
             return false;
+        }
+    }
+
+    private enum ComparisonOperator {
+        EQUALS("=", "="),
+        NOT_EQUALS("!=", "!=", "<>");
+
+        private final String formulaOperator;
+        private final List<String> sqlTokens;
+
+        ComparisonOperator(String formulaOperator, String... sqlTokens) {
+            this.formulaOperator = formulaOperator;
+            this.sqlTokens = Arrays.asList(sqlTokens);
+        }
+
+        String getFormulaOperator() {
+            return formulaOperator;
+        }
+
+        static Optional<ComparisonOperator> fromToken(String token) {
+            String trimmed = token.trim();
+            for (ComparisonOperator operator : values()) {
+                for (String candidate : operator.sqlTokens) {
+                    if (candidate.equalsIgnoreCase(trimmed)) {
+                        return Optional.of(operator);
+                    }
+                }
+            }
+            return Optional.empty();
         }
     }
 

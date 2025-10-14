@@ -194,11 +194,38 @@ class AirtableStatement implements Statement {
                         return false;
                     }
                     break;
+                case EQUALS:
+                    Object expected = filter.getValue().orElse(null);
+                    if (value == null || expected == null) {
+                        return false;
+                    }
+                    if (!valuesEqual(value, expected)) {
+                        return false;
+                    }
+                    break;
+                case NOT_EQUALS:
+                    Object forbidden = filter.getValue().orElse(null);
+                    if (value == null || forbidden == null) {
+                        return false;
+                    }
+                    if (valuesEqual(value, forbidden)) {
+                        return false;
+                    }
+                    break;
                 default:
                     throw new IllegalStateException("Unsupported filter operator: " + filter.getOperator());
             }
         }
         return true;
+    }
+
+    private static boolean valuesEqual(Object left, Object right) {
+        if (left instanceof Number && right instanceof Number) {
+            double leftValue = ((Number) left).doubleValue();
+            double rightValue = ((Number) right).doubleValue();
+            return Double.compare(leftValue, rightValue) == 0;
+        }
+        return Objects.equals(left, right);
     }
 
     @Override

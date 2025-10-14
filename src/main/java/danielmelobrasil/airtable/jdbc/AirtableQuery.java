@@ -111,6 +111,11 @@ final class AirtableQuery {
                 fields.add(field.getField());
             }
         }
+        for (PostFilter filter : postFilters) {
+            if (filter.getOrigin() == SelectedField.Origin.JOIN && !fields.contains(filter.getField())) {
+                fields.add(filter.getField());
+            }
+        }
         Join joinValue = join.get();
         if (!isRecordIdField(joinValue.getRightField()) && !fields.contains(joinValue.getRightField())) {
             fields.add(joinValue.getRightField());
@@ -225,17 +230,28 @@ final class AirtableQuery {
     static final class PostFilter {
         enum Operator {
             IS_NULL,
-            IS_NOT_NULL
+            IS_NOT_NULL,
+            EQUALS,
+            NOT_EQUALS
         }
 
         private final SelectedField.Origin origin;
         private final String field;
         private final Operator operator;
+        private final Object value;
 
         PostFilter(SelectedField.Origin origin, String field, Operator operator) {
+            this(origin, field, operator, null);
+        }
+
+        PostFilter(SelectedField.Origin origin, String field, Operator operator, Object value) {
             this.origin = Objects.requireNonNull(origin, "origin");
             this.field = Objects.requireNonNull(field, "field");
             this.operator = Objects.requireNonNull(operator, "operator");
+            if ((operator == Operator.EQUALS || operator == Operator.NOT_EQUALS) && value == null) {
+                throw new IllegalArgumentException("value é obrigatório para operador " + operator);
+            }
+            this.value = value;
         }
 
         SelectedField.Origin getOrigin() {
@@ -248,6 +264,10 @@ final class AirtableQuery {
 
         Operator getOperator() {
             return operator;
+        }
+
+        Optional<Object> getValue() {
+            return Optional.ofNullable(value);
         }
     }
 }
