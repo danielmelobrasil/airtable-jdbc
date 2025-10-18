@@ -16,6 +16,7 @@ import java.sql.Statement;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -35,10 +36,20 @@ class AirtableResultSet implements ResultSet {
     AirtableResultSet(AirtableStatement statement,
                       List<Map<String, Object>> records,
                       List<String> requestedColumns) {
+        this(statement, records, requestedColumns, Collections.emptyMap());
+    }
+
+    AirtableResultSet(AirtableStatement statement,
+                      List<Map<String, Object>> records,
+                      List<String> requestedColumns,
+                      Map<String, AirtableResultSetMetaData.ColumnTypeInfo> columnTypes) {
         this.statement = Objects.requireNonNull(statement, "statement");
         this.records = Collections.unmodifiableList(new ArrayList<>(records));
         this.columnOrder = determineColumnOrder(records, requestedColumns);
-        this.metaData = new AirtableResultSetMetaData(columnOrder);
+        Map<String, AirtableResultSetMetaData.ColumnTypeInfo> types = columnTypes != null
+                ? new LinkedHashMap<>(columnTypes)
+                : new LinkedHashMap<>();
+        this.metaData = new AirtableResultSetMetaData(columnOrder, types);
     }
 
     private static List<String> determineColumnOrder(List<Map<String, Object>> records, List<String> requestedColumns) {

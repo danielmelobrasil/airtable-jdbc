@@ -1063,7 +1063,7 @@ class AirtableDatabaseMetaData implements DatabaseMetaData {
         }
     }
 
-    private static SqlTypeInfo mapFieldType(String airtableType) {
+    static SqlTypeInfo mapFieldType(String airtableType) {
         String type = airtableType != null ? airtableType.toLowerCase(Locale.ENGLISH) : "singlelinetext";
         switch (type) {
             case "number":
@@ -1106,7 +1106,7 @@ class AirtableDatabaseMetaData implements DatabaseMetaData {
         }
     }
 
-    private static final class SqlTypeInfo {
+    static final class SqlTypeInfo {
         final int jdbcType;
         final String typeName;
         final Integer columnSize;

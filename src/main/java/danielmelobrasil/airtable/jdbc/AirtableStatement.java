@@ -7,9 +7,11 @@ import java.sql.SQLFeatureNotSupportedException;
 import java.sql.SQLWarning;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -36,7 +38,8 @@ class AirtableStatement implements Statement {
         AirtableQuery effectiveQuery = applyLimit(query);
         List<Map<String, Object>> baseRecords = connection.getApiClient().select(effectiveQuery);
         List<Map<String, Object>> records = mergeJoinIfNeeded(effectiveQuery, baseRecords);
-        currentResultSet = new AirtableResultSet(this, records, effectiveQuery.getColumnLabels());
+        Map<String, AirtableResultSetMetaData.ColumnTypeInfo> columnTypes = buildColumnTypes(effectiveQuery, records);
+        currentResultSet = new AirtableResultSet(this, records, effectiveQuery.getColumnLabels(), columnTypes);
         return currentResultSet;
     }
 
@@ -217,6 +220,51 @@ class AirtableStatement implements Statement {
             }
         }
         return true;
+    }
+
+    private Map<String, AirtableResultSetMetaData.ColumnTypeInfo> buildColumnTypes(AirtableQuery query,
+                                                                                   List<Map<String, Object>> records) throws SQLException {
+        List<AirtableQuery.SelectedField> fields = query.getSelectedFields();
+        Map<String, String> baseFieldTypes = connection.getApiClient().getFieldTypes(query.getTableName());
+        Map<String, String> joinFieldTypes = query.getJoin().isPresent()
+                ? connection.getApiClient().getFieldTypes(query.getJoin().get().getTableName())
+                : Collections.emptyMap();
+
+        if (fields.isEmpty()) {
+            if (records.isEmpty()) {
+                return Collections.emptyMap();
+            }
+            Map<String, AirtableResultSetMetaData.ColumnTypeInfo> columnTypes = new LinkedHashMap<>();
+            Map<String, Object> first = records.get(0);
+            for (String columnLabel : first.keySet()) {
+                if (AirtableQuery.isRecordIdField(columnLabel)) {
+                    columnTypes.put(columnLabel, AirtableResultSetMetaData.ColumnTypeInfo.forRecordId());
+                    continue;
+                }
+                String airtableType = baseFieldTypes.get(columnLabel.toLowerCase(Locale.ENGLISH));
+                AirtableDatabaseMetaData.SqlTypeInfo sqlTypeInfo = AirtableDatabaseMetaData.mapFieldType(airtableType);
+                columnTypes.put(columnLabel, AirtableResultSetMetaData.ColumnTypeInfo.fromSqlTypeInfo(sqlTypeInfo));
+            }
+            return columnTypes;
+        }
+
+        Map<String, AirtableResultSetMetaData.ColumnTypeInfo> columnTypes = new LinkedHashMap<>();
+        for (AirtableQuery.SelectedField field : fields) {
+            if (AirtableQuery.isRecordIdField(field.getField())) {
+                columnTypes.put(field.getLabel(), AirtableResultSetMetaData.ColumnTypeInfo.forRecordId());
+                continue;
+            }
+            Map<String, String> source = field.getOrigin() == AirtableQuery.SelectedField.Origin.BASE
+                    ? baseFieldTypes
+                    : joinFieldTypes;
+            String airtableType = null;
+            if (source != null && !source.isEmpty()) {
+                airtableType = source.get(field.getField().toLowerCase(Locale.ENGLISH));
+            }
+            AirtableDatabaseMetaData.SqlTypeInfo sqlTypeInfo = AirtableDatabaseMetaData.mapFieldType(airtableType);
+            columnTypes.put(field.getLabel(), AirtableResultSetMetaData.ColumnTypeInfo.fromSqlTypeInfo(sqlTypeInfo));
+        }
+        return columnTypes;
     }
 
     private static boolean valuesEqual(Object left, Object right) {

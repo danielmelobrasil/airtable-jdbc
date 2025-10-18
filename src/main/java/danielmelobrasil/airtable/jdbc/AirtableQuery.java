@@ -108,12 +108,16 @@ final class AirtableQuery {
         List<String> fields = new ArrayList<>();
         for (SelectedField field : selectedFields) {
             if (field.getOrigin() == SelectedField.Origin.JOIN) {
-                fields.add(field.getField());
+                if (!isRecordIdField(field.getField())) {
+                    fields.add(field.getField());
+                }
             }
         }
         for (PostFilter filter : postFilters) {
             if (filter.getOrigin() == SelectedField.Origin.JOIN && !fields.contains(filter.getField())) {
-                fields.add(filter.getField());
+                if (!isRecordIdField(filter.getField())) {
+                    fields.add(filter.getField());
+                }
             }
         }
         Join joinValue = join.get();
@@ -151,7 +155,7 @@ final class AirtableQuery {
         }
     }
 
-    private static boolean isRecordIdField(String field) {
+    static boolean isRecordIdField(String field) {
         return "id".equalsIgnoreCase(field) || "record_id".equalsIgnoreCase(field);
     }
 

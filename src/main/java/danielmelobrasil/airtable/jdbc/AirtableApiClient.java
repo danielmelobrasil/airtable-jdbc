@@ -286,7 +286,7 @@ class AirtableApiClient {
         return response;
     }
 
-    private Map<String, String> getFieldTypes(String tableName) throws SQLException {
+    Map<String, String> getFieldTypes(String tableName) throws SQLException {
         if (tableName == null || tableName.isEmpty()) {
             return Collections.emptyMap();
         }
