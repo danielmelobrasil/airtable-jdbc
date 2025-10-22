@@ -27,7 +27,7 @@ final class AirtableSqlParser {
     private static final Pattern COMPARISON = Pattern.compile("^(.*?)\\s*(=|<>|!=)\\s*(.+)$");
     private static final Pattern NULL_CHECK = Pattern.compile("^(.*?)\\s+IS\\s+(NOT\\s+)?NULL$", Pattern.CASE_INSENSITIVE);
     private static final Pattern ORDER_BY_SPLIT = Pattern.compile("\\s*,\\s*");
-    private static final Pattern ORDER_BY_TOKEN = Pattern.compile("^(.+?)\\s+(ASC|DESC)?$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ORDER_BY_TOKEN = Pattern.compile("^(.+?)(?:\\s+(ASC|DESC))?$", Pattern.CASE_INSENSITIVE);
     private static final Pattern AS_ALIAS = Pattern.compile("(?i)^(.*?)\\s+AS\\s+(.*)$");
     private static final Pattern TABLE_TOKEN = Pattern.compile("(?i)^(?<table>`[^`]+`|\"[^\"]+\"|'[^']+'|[^\\s]+)(?:\\s+(?:AS\\s+)?(?<alias>[^\\s]+))?$");
     private static final Pattern ON_CLAUSE = Pattern.compile("(?i)\\sON\\s");

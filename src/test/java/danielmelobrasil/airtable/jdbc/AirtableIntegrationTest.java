@@ -8,6 +8,7 @@ import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Integration test that exercises the driver against a live Airtable base.
@@ -16,6 +17,7 @@ import static org.junit.Assert.assertNotNull;
 public class AirtableIntegrationTest {
 
     private static final String TABLE_QUERY = "SELECT p.Plano, t.Tarefa, t.`Agrupamento (Plano de Ação)`, t.`Responsáveis` FROM `Planos de Ação` as p LEFT JOIN `Tarefas` t ON (p.id = t.`Planos de Ação`) WHERE p.id = ?";
+    private static final String ORDER_BY_QUERY = "SELECT c.`Capacidade`, c.`Grupo`, c.`Tipo`, c.`Status`, c.`Início`, c.`Término`, c.`Publicação Oficial`, c.`Ordem` FROM `Capacidade nsApps` AS c ORDER BY c.`Tipo`, c.`Ordem`";
 
     @Test
     public void queryPlanosDeAcao() throws Exception {
@@ -72,6 +74,29 @@ public class AirtableIntegrationTest {
                     }
                 }
             }
+        }
+    }
+
+    @Test
+    public void queryCapacidadeNsAppsOrderBy() throws Exception {
+        String apiKey = System.getenv("AIRTABLE_API_KEY");
+        Assume.assumeTrue("AIRTABLE_API_KEY environment variable must be set to run this test.", apiKey != null && !apiKey.isEmpty());
+        String baseId = System.getenv("AIRTABLE_BASE_ID");
+        Assume.assumeTrue("AIRTABLE_BASE_ID environment variable must be set to run this test.", baseId != null && !baseId.isEmpty());
+
+        String url = "jdbc:airtable://" + apiKey + "@" + baseId;
+
+        try (Connection connection = DriverManager.getConnection(url);
+             java.sql.Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(ORDER_BY_QUERY)) {
+
+            assertNotNull("Result set should not be null", resultSet);
+            int rowCount = 0;
+            do {
+                rowCount++;
+            } while (resultSet.next());
+
+            assertTrue("A consulta deveria retornar pelo menos 1 registro.", rowCount > 0);
         }
     }
 }

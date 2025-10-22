@@ -99,6 +99,35 @@ public class AirtableSqlParserTest {
     }
 
     @Test
+    public void parseOrderByMultipleFieldsWithoutDirections() throws Exception {
+        AirtableQuery query = AirtableSqlParser.parse(
+                "SELECT Name FROM Contacts ORDER BY Name, CreatedTime DESC, Score"
+        );
+
+        assertEquals(3, query.getSorts().size());
+        assertEquals("Name", query.getSorts().get(0).getField());
+        assertEquals(AirtableQuery.Sort.Direction.ASC, query.getSorts().get(0).getDirection());
+        assertEquals("CreatedTime", query.getSorts().get(1).getField());
+        assertEquals(AirtableQuery.Sort.Direction.DESC, query.getSorts().get(1).getDirection());
+        assertEquals("Score", query.getSorts().get(2).getField());
+        assertEquals(AirtableQuery.Sort.Direction.ASC, query.getSorts().get(2).getDirection());
+    }
+
+    @Test
+    public void parseOrderByWithQuotedIdentifiersAndAlias() throws Exception {
+        AirtableQuery query = AirtableSqlParser.parse(
+                "SELECT c.`Capacidade`, c.`Grupo`, c.`Tipo`, c.`Status`, c.`Início`, c.`Término`, c.`Publicação Oficial`, c.`Ordem` " +
+                        "FROM `Capacidade nsApps` AS c ORDER BY c.`Tipo`, c.`Ordem`"
+        );
+
+        assertEquals("Capacidade nsApps", query.getTableName());
+        assertEquals(8, query.getSelectedFields().size());
+        assertEquals(2, query.getSorts().size());
+        assertEquals("Tipo", query.getSorts().get(0).getField());
+        assertEquals("Ordem", query.getSorts().get(1).getField());
+    }
+
+    @Test
     public void parseSelectWithLeftJoin() throws Exception {
         AirtableQuery query = AirtableSqlParser.parse(
                 "SELECT Contacts.Name AS contact_name, Organizations.Name AS org_name " +

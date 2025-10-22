@@ -187,7 +187,7 @@ class AirtableApiClient {
                 params.computeIfAbsent(String.format(Locale.ENGLISH, "sort[%d][field]", i),
                         key -> new ArrayList<>()).add(sort.getField());
                 params.computeIfAbsent(String.format(Locale.ENGLISH, "sort[%d][direction]", i),
-                        key -> new ArrayList<>()).add(sort.getDirection().toString());
+                        key -> new ArrayList<>()).add(sort.getDirection().toString().toLowerCase(Locale.ENGLISH));
             }
         }
 
