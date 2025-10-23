@@ -363,8 +363,40 @@ class AirtableApiClient {
                 }
                 return value;
             default:
+                // Normalize Lookup fields to a user-friendly string (comma-separated), instead of [a, b]
+                if (airtableType != null && airtableType.contains("lookup") && value instanceof List) {
+                    return joinListValues((List<?>) value);
+                }
                 return value;
         }
+    }
+
+    private static String joinListValues(List<?> list) {
+        if (list == null || list.isEmpty()) {
+            return "";
+        }
+        List<String> parts = new ArrayList<>(list.size());
+        for (Object element : list) {
+            if (element == null) {
+                continue;
+            }
+            if (element instanceof Map) {
+                Map<?, ?> map = (Map<?, ?>) element;
+                Object preferred = map.get("name");
+                if (preferred == null) preferred = map.get("value");
+                if (preferred == null) preferred = map.get("email");
+                if (preferred == null) preferred = map.get("id");
+                if (preferred == null && !map.isEmpty()) {
+                    preferred = map.values().iterator().next();
+                }
+                parts.add(preferred != null ? String.valueOf(preferred) : "");
+            } else if (element instanceof List) {
+                parts.add(joinListValues((List<?>) element));
+            } else {
+                parts.add(String.valueOf(element));
+            }
+        }
+        return String.join(", ", parts);
     }
 
     private MetaTablesResponse parseMetaTables(String body) throws IOException {
