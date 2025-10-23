@@ -55,11 +55,11 @@ class AirtableApiClient {
     List<Map<String, Object>> selectJoinTable(AirtableQuery query) throws SQLException {
         AirtableQuery.Join join = query.getJoin()
                 .orElseThrow(() -> new SQLException("Join não definido para a consulta."));
-        Map<String, String> fieldTypes = getFieldTypes(join.getTableName());
         List<String> fields = query.getRequiredFieldsForJoinTable();
         if (fields.isEmpty()) {
             return Collections.emptyList();
         }
+        Map<String, String> fieldTypes = getFieldTypes(join.getTableName());
         return executeSelect(
                 join.getTableName(),
                 fields,
@@ -296,13 +296,14 @@ class AirtableApiClient {
             if (cached != null) {
                 return cached;
             }
+            // Fetch metadata and only cache the requested table's schema
             List<MetaTable> tables = fetchTablesMetadata();
+            Map<String, String> result = null;
             for (MetaTable table : tables) {
                 if (table.name == null) {
                     continue;
                 }
-                String key = table.name.toLowerCase(Locale.ENGLISH);
-                if (!fieldTypesCache.containsKey(key)) {
+                if (table.name.equalsIgnoreCase(tableName)) {
                     Map<String, String> types = new HashMap<>();
                     if (table.fields != null) {
                         for (MetaField field : table.fields) {
@@ -311,10 +312,11 @@ class AirtableApiClient {
                             }
                         }
                     }
-                    fieldTypesCache.put(key, Collections.unmodifiableMap(types));
+                    result = Collections.unmodifiableMap(types);
+                    fieldTypesCache.put(normalizedTableName, result);
+                    break;
                 }
             }
-            Map<String, String> result = fieldTypesCache.get(normalizedTableName);
             if (result == null) {
                 result = Collections.emptyMap();
                 fieldTypesCache.put(normalizedTableName, result);

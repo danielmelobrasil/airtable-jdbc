@@ -225,8 +225,16 @@ class AirtableStatement implements Statement {
     private Map<String, AirtableResultSetMetaData.ColumnTypeInfo> buildColumnTypes(AirtableQuery query,
                                                                                    List<Map<String, Object>> records) throws SQLException {
         List<AirtableQuery.SelectedField> fields = query.getSelectedFields();
-        Map<String, String> baseFieldTypes = connection.getApiClient().getFieldTypes(query.getTableName());
-        Map<String, String> joinFieldTypes = query.getJoin().isPresent()
+
+        boolean requiresBaseTypes = fields.isEmpty() || fields.stream()
+                .anyMatch(f -> f.getOrigin() == AirtableQuery.SelectedField.Origin.BASE);
+        boolean requiresJoinTypes = query.getJoin().isPresent() && fields.stream()
+                .anyMatch(f -> f.getOrigin() == AirtableQuery.SelectedField.Origin.JOIN);
+
+        Map<String, String> baseFieldTypes = requiresBaseTypes
+                ? connection.getApiClient().getFieldTypes(query.getTableName())
+                : Collections.emptyMap();
+        Map<String, String> joinFieldTypes = requiresJoinTypes
                 ? connection.getApiClient().getFieldTypes(query.getJoin().get().getTableName())
                 : Collections.emptyMap();
 
