@@ -50,15 +50,15 @@ final class AirtableSqlParser {
             throw new AirtableSqlParseException("Only SELECT statements are supported.");
         }
 
-        int fromIndex = indexOfKeyword(trimmed, "FROM");
+        int fromIndex = indexOfKeywordOutsideQuotes(trimmed, "FROM");
         if (fromIndex < 0) {
             throw new AirtableSqlParseException("Missing FROM clause.");
         }
 
         String columnSegment = trimmed.substring("SELECT".length(), fromIndex).trim();
-        int whereIndex = indexOfKeyword(trimmed, "WHERE");
-        int orderIndex = indexOfKeyword(trimmed, "ORDER BY");
-        int limitIndex = indexOfKeyword(trimmed, "LIMIT");
+        int whereIndex = indexOfKeywordOutsideQuotes(trimmed, "WHERE");
+        int orderIndex = indexOfKeywordOutsideQuotes(trimmed, "ORDER BY");
+        int limitIndex = indexOfKeywordOutsideQuotes(trimmed, "LIMIT");
 
         int tableEnd = firstPositive(whereIndex, orderIndex, limitIndex, trimmed.length());
         int tableStart = skipKeyword(trimmed, fromIndex, "FROM");
@@ -523,13 +523,51 @@ final class AirtableSqlParser {
         return source.toLowerCase(Locale.ENGLISH).indexOf(keyword.toLowerCase(Locale.ENGLISH));
     }
 
-    private static int indexOfJoinKeyword(String source) {
+    // Finds the index of a SQL keyword outside of quotes/backticks.
+    // Matches only on token boundaries (non-alphanumeric on both sides when applicable).
+    private static int indexOfKeywordOutsideQuotes(String source, String keyword) {
         String lower = source.toLowerCase(Locale.ENGLISH);
-        int joinIndex = lower.indexOf(" left join ");
-        if (joinIndex >= 0) {
-            return joinIndex;
+        String target = keyword.toLowerCase(Locale.ENGLISH);
+        int n = lower.length();
+        int m = target.length();
+        boolean inSingle = false, inDouble = false, inBacktick = false;
+        for (int i = 0; i <= n - m; i++) {
+            char ch = lower.charAt(i);
+            // toggle quote states
+            if (!inDouble && !inBacktick && ch == '\'') {
+                inSingle = !inSingle;
+                continue;
+            }
+            if (!inSingle && !inBacktick && ch == '"') {
+                inDouble = !inDouble;
+                continue;
+            }
+            if (!inSingle && !inDouble && ch == '`') {
+                inBacktick = !inBacktick;
+                continue;
+            }
+
+            if (inSingle || inDouble || inBacktick) {
+                continue;
+            }
+
+            if (lower.regionMatches(i, target, 0, m)) {
+                boolean beforeOk = i == 0 || !Character.isLetterOrDigit(lower.charAt(i - 1));
+                boolean afterOk = (i + m) >= n || !Character.isLetterOrDigit(lower.charAt(i + m));
+                if (beforeOk && afterOk) {
+                    return i;
+                }
+            }
         }
-        return lower.indexOf(" left joint ");
+        return -1;
+    }
+
+    private static int indexOfJoinKeyword(String source) {
+        int leftJoin = indexOfKeywordOutsideQuotes(source, "LEFT JOIN");
+        if (leftJoin >= 0) {
+            return leftJoin;
+        }
+        return indexOfKeywordOutsideQuotes(source, "LEFT JOINT");
     }
 
     private static int skipKeyword(String sql, int keywordIndex, String keyword) {

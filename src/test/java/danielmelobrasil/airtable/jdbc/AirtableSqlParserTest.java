@@ -128,6 +128,23 @@ public class AirtableSqlParserTest {
     }
 
     @Test
+    public void parseSelectWithBacktickedFieldContainingFrom() throws Exception {
+        AirtableQuery query = AirtableSqlParser.parse(
+                "SELECT i.`Mês`, i.`Valor`, i.`Meta`, i.`Key Result`, i.`Item de Portfólio`, i.`Objetivo (from Key Result)` " +
+                        "FROM `KR Item` AS i"
+        );
+
+        assertEquals("KR Item", query.getTableName());
+        assertEquals(6, query.getSelectedFields().size());
+        assertEquals("Mês", query.getSelectedFields().get(0).getField());
+        assertEquals("Valor", query.getSelectedFields().get(1).getField());
+        assertEquals("Meta", query.getSelectedFields().get(2).getField());
+        assertEquals("Key Result", query.getSelectedFields().get(3).getField());
+        assertEquals("Item de Portfólio", query.getSelectedFields().get(4).getField());
+        assertEquals("Objetivo (from Key Result)", query.getSelectedFields().get(5).getField());
+    }
+
+    @Test
     public void parseSelectWithLeftJoin() throws Exception {
         AirtableQuery query = AirtableSqlParser.parse(
                 "SELECT Contacts.Name AS contact_name, Organizations.Name AS org_name " +
