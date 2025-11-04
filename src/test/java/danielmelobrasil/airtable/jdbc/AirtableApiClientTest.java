@@ -58,6 +58,41 @@ public class AirtableApiClientTest {
     }
 
     @Test
+    public void buildSelectUrlIncludesMaxRecordsWhenLimitUsed() throws Exception {
+        AirtableQuery query = AirtableSqlParser.parse(
+                "SELECT `Name` FROM Contacts LIMIT 5"
+        );
+
+        AirtableConfig config = createConfig();
+        AirtableApiClient client = new AirtableApiClient(config);
+
+        Method buildSelectUrl = AirtableApiClient.class.getDeclaredMethod(
+                "buildSelectUrl",
+                String.class,
+                List.class,
+                Optional.class,
+                Optional.class,
+                List.class,
+                Optional.class,
+                Optional.class
+        );
+        buildSelectUrl.setAccessible(true);
+
+        String url = (String) buildSelectUrl.invoke(
+                client,
+                query.getTableName(),
+                query.getRequiredFieldsForBaseTable(),
+                query.getFilterFormula(),
+                query.getMaxRecords(),
+                query.getSorts(),
+                config.getDefaultView(),
+                Optional.empty()
+        );
+
+        assertTrue("URL should include maxRecords=5", url.contains("maxRecords=5"));
+    }
+
+    @Test
     public void statementPassesSortsToApiClient() throws Exception {
         AirtableConfig config = createConfig();
         RecordingAirtableApiClient client = new RecordingAirtableApiClient(config);

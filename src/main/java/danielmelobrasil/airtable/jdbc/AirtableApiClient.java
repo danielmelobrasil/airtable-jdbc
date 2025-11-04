@@ -125,7 +125,19 @@ class AirtableApiClient {
             HttpURLConnection connection = null;
             String url = null;
             try {
-                url = buildSelectUrl(tableName, selectedFields, filterFormula, maxRecords, sorts, view, Optional.ofNullable(offset));
+                // If a LIMIT was provided, ensure subsequent pages respect the remaining budget.
+                Optional<Integer> remaining = maxRecords.map(limit -> Math.max(0, limit - allRecords.size()));
+                Optional<Integer> effectiveMax = remaining.filter(r -> r > 0);
+
+                url = buildSelectUrl(
+                        tableName,
+                        selectedFields,
+                        filterFormula,
+                        effectiveMax,
+                        sorts,
+                        view,
+                        Optional.ofNullable(offset)
+                );
                 connection = openConnection(url, config.getTimeout());
                 int status = connection.getResponseCode();
                 String body = readResponseBody(connection, status);
@@ -136,6 +148,11 @@ class AirtableApiClient {
                         allRecords.add(applyFieldTypeConversions(row, fieldTypes));
                     }
                     offset = response.offset;
+
+                    // Stop paginating when we have reached the requested limit, if any.
+                    if (maxRecords.isPresent() && allRecords.size() >= maxRecords.get()) {
+                        break;
+                    }
                 } else {
                     LOGGER.log(Level.WARNING, "Airtable API request failed. Status: {0}, Body: {1}, URL: {2}", new Object[]{status, body, url});
                     throw new SQLException("Airtable API request failed with status " + status + ": " + body);
